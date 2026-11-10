@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:cold_chain_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  flyway:
+    enabled: false
+
+app:
+  jwt:
+    secret: c3VwZXJfc2VjcmV0X2tleV9mb3Jfand0X3NpZ25pbmdfY29sZF9jaGFpbl8yMDI2
+    expiration-ms: 86400000
+  rules:
+    default-allowed-lateness-minutes: 120
+    default-cadence-minutes: 5

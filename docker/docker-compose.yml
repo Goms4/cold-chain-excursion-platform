@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cold_chain
+      POSTGRES_USER: cold_chain
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cold_chain_secret}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cold_chain -d cold_chain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: cold_chain
+      DB_USER: cold_chain
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-cold_chain_secret}
+      JWT_SECRET: ${JWT_SECRET:-c3VwZXJfc2VjcmV0X2tleV9mb3Jfand0X3NpZ25pbmdfY29sZF9jaGFpbl8yMDI2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80" # Map 3000 to Nginx port 80 for production React build
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

@@ -1,0 +1,40 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: cold-chain-platform
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cold_chain}
+    username: ${DB_USER:cold_chain}
+    password: ${DB_PASSWORD:cold_chain_secret}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:c3VwZXJfc2VjcmV0X2tleV9mb3Jfand0X3NpZ25pbmdfY29sZF9jaGFpbl8yMDI2}
+    expiration-ms: 86400000 # 24 hours
+  rules:
+    default-allowed-lateness-minutes: 120
+    default-cadence-minutes: 5
