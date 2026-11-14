@@ -1,5 +1,147 @@
 # Verification log
 
+## 2026-11-14 — Clean-checkout GitHub Actions pipeline bootstrap
+
+### Root cause and read-only findings
+
+- Confirmed the failure mechanism from a clean-checkout contract: CI ran
+  `pytest -q` without first creating `data-pipeline/output/LATEST`; three of
+  the five tests read `LATEST` and the timestamped directory. The exporter
+  writes `data-pipeline/output/<UTC timestamp>/` containing six dimension/fact
+  CSVs (`dim_shipment`, `dim_lot`, `fact_sensor_event`, `fact_excursion`,
+  `fact_investigation`, `fact_decision`), `telemetry_quality_report.csv`,
+  `kpi_summary.csv`, and `manifest.csv`, then atomically updates `LATEST`.
+- Pipeline connection variables are `PGHOST`, `PGPORT`, `PGDATABASE`,
+  `PGUSER`, and `PGPASSWORD`; extraction must use `coldchain_analytics`.
+  `scripts/run-pipeline.sh` also runs `scripts/pipeline-verify.sh`, whose
+  read-only base-table reconciliation must use `coldchain_migrator` and its
+  password. `requirements.txt` pins pandas, psycopg[binary], and pytest.
+  Tests require actual seeded normal/excursion telemetry, duplicate, accepted
+  late, quarantined, missing-gap records, and refrigerated plus controlled /
+  ambient profile ranges. They also enforce CSV field contracts and manifest
+  reconciliation.
+- Before parameterization, role scripts defaulted their provisioning
+  administrator to `PGUSER` or the current Unix `$USER`, defaulted target DB
+  to `cold_chain`, and connected to a hard-coded `postgres` database. The
+  analytics provisioner generated and wrote `data-pipeline/.env` if its
+  password was absent. The pipeline runner always sourced that file when it
+  existed. CI avoids these machine-local paths by setting every role/database
+  credential, provisioning database, host, and port; provisioning database
+  is now parameterized, analytics auto-file creation is bypassed with an
+  explicit password, and the runner accepts an opt-out from sourcing `.env`.
+- Role names in provisioning SQL and Docker init are intentional shared
+  contracts, not local-machine dependencies. `docker/init-roles.sh` runs under
+  the Postgres image entrypoint with injected POSTGRES credentials; it does not
+  rely on `docker exec`. Provisioning scripts use explicit TCP `-h` arguments,
+  not Unix sockets. The `_demo`/`_local` destructive reset interlock belongs
+  to `demo-reset.sh`; CI does not call it. It provisions a fresh uniquely named
+  database and does not drop or reset any database.
+- `scripts/demo-seed.sh` needs curl, jq, node, `COLDLATCH_API_URL`, and
+  distinct Operations and Analyst passwords. Its normal authenticated session
+  and CSRF requests are used. The backend has `local` and `demo` profiles, and
+  outside those profiles it rejects blank, equal, or built-in demo credentials.
+  CI supplies per-run distinct values and explicitly starts the `local`
+  profile.
+- `/actuator/health` is public (`SecurityConfig` permits it) and exposes DB
+  health. `application.yml` uses `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
+  `DB_PASSWORD` for the application and `FLYWAY_USER`, `FLYWAY_PASSWORD` for
+  migrations. V9 creates `pgcrypto`; V11 creates the `analytics` schema and
+  read views; V12 extends decision evidence context.
+
+### Required operation order
+
+1. Wait for PostgreSQL 17 over TCP; create the least-privilege application
+   roles and a fresh target database using the existing role provisioning.
+2. Install `pgcrypto` before Flyway starts.
+3. Build/start the backend with the `local` profile; Flyway applies V1–V12 as
+   `coldchain_migrator`, and the runtime uses `coldchain_app`.
+4. Wait for unauthenticated `/actuator/health` to report healthy. Only now
+   provision `coldchain_analytics` and grant SELECT on the migrated views.
+5. Seed through `scripts/demo-seed.sh`; verify with `scripts/demo-verify.sh`.
+6. Run the exporter as `coldchain_analytics`, reconcile the source counts as
+   `coldchain_migrator`, validate `LATEST`/CSV/manifest, then run pytest.
+7. Stop the backend; Docker image builds depend on all three validation jobs.
+
+### Implementation state
+
+- Added `scripts/ci-pipeline-env.sh` as the CI/local orchestration entry point.
+  Existing provisioning keeps its previous defaults; new environment
+  parameters select the bootstrap connection database and optional creation
+  of a fresh target database. Analytics provisioning can be deferred, while
+  its default behavior remains enabled for existing callers. The pipeline
+  runner's default `.env` loading is unchanged; the bootstrap explicitly opts
+  out so it cannot be redirected by a local ignored file.
+- The workflow now generates throwaway credentials, masks them in the
+  database job, provisions PostgreSQL 17, builds the jar, seeds through REST,
+  exports from the analytics role, and rejects skipped pytest cases. It has
+  least-privilege workflow permissions, ref-scoped cancellation, bounded
+  runtime, failure diagnostics, and seven-day diagnostics artifacts guarded
+  by a password scan. Action versions were updated for checkout/setup-java/
+  setup-node/setup-python and upload-artifact where used; Java remains 17.
+- `.gitignore` already excluded `.env`, `data-pipeline/.env`, pipeline output,
+  and `backups/`; added key/certificate and common database dump suffixes.
+  SQL source migrations remain trackable.
+
+### Isolated clean-checkout validation
+
+- Prepared a fresh clone under `/tmp` and confirmed it had neither
+  `data-pipeline/output/` nor `data-pipeline/.env`. Used a disposable PostgreSQL
+  17 container on `127.0.0.1:55432`, database `coldlatch_ci_final`, and the
+  backend on port `18080`; no command-line connection targeted the user's
+  `cold_chain` database. The container and temporary checkout were removed
+  after verification.
+- During the first failed local attempt, port 8080 was already occupied. Before
+  adding the TCP-port guard, the helper issued one read-only public
+  `/actuator/health` request to that existing service, then failed before app
+  grants or REST seeding because the temporary database had not migrated.
+  No local database writes or seed operations occurred. The final successful
+  validation used port 18080; the helper now checks port availability without
+  sending a request to an existing service.
+- Bootstrap output confirmed 12 successful Flyway migrations (V1 through V12),
+  `/actuator/health` became UP, and the existing REST seed/demo verification
+  completed. Role verification showed `coldchain_admin` as superuser and
+  `coldchain_migrator`, `coldchain_app`, and `coldchain_analytics` as
+  `super=false`. The app grants and analytics view grants both completed only
+  after migrations.
+- Export produced 10 shipments, 11 lots, 27 sensor events, 5 excursions, 5
+  investigations, 3 decisions, 11 quality-report rows, and 7 KPI rows. Every
+  dataset, reconciliation, and raw-event identity row in `manifest.csv` was
+  `PASS`; identity was `27 = 22 + 3 + 2`. Pytest reported `5 passed in 0.54s`
+  with no skipped tests. A prior isolated run reported `5 passed in 0.74s`.
+- A second export without changing the database produced the same row counts
+  and SHA-256 for each of the nine CSVs (including manifest):
+
+  | CSV | SHA-256 |
+  | --- | --- |
+  | `dim_shipment.csv` | `59d8ef65468d778e05b4350ae8aca23fdfc62a1a70e5e19ef88db16e2cb8f147` |
+  | `dim_lot.csv` | `1e67b699d4ae2af0f07d53170ff57d8d655747a380b207b56e4001272b27db80` |
+  | `fact_sensor_event.csv` | `040d1e1b12b6830446f433e3f1da41a293dc69c089b17ab4ffc0f43cbd859586` |
+  | `fact_excursion.csv` | `7b5dd330105123c9d5a04fa041a42d8aeb930d357b23e752b115c3fd57ec40ea` |
+  | `fact_investigation.csv` | `0e54d8e0f1e25d979276f6013667f194827b09f65ec081036fb9db98428123cc` |
+  | `fact_decision.csv` | `144792f0be958e9d545ec2b6d780751dc8f4bcc22162145506f7332ab69d356a` |
+  | `telemetry_quality_report.csv` | `7a61181f58bfa3c05c32519a6ecac9d7d6664425ca0bad64d430ac48332d5527` |
+  | `kpi_summary.csv` | `e039f4c5ce2518d1b851fcdd16943c0b81be4872266b9495a29c04697013385e` |
+  | `manifest.csv` | `47acd1fffe1b2e84e3d31a5337f97c2a54d67926f587bc87933e55d03f9b60b0` |
+
+- Deleting `output/` in that clone and running pytest alone reproduced the
+  initial issue exactly: `3 failed, 2 passed`; the three export-dependent
+  tests reported `FileNotFoundError` for `data-pipeline/output/LATEST`.
+- Final checks: Maven reported `23 tests, 0 failures, 0 errors, 0 skipped`;
+  `npm run build` passed; both backend and frontend Docker image builds passed;
+  Ruby's YAML parser and `bash -n` accepted the workflow and scripts; `git diff
+  --check` passed. `git check-ignore` confirmed output, `.env`, backup, PEM,
+  key, and dump paths are ignored. No actionlint binary was installed, so YAML
+  was validated with Ruby's parser instead.
+- The official action documentation/release notes were checked for checkout
+  v7, setup-java v6, setup-node v7, setup-python v7, and upload-artifact v7.
+  The action examples confirm the configured Java, Node, Python, caching,
+  artifact path/name/retention inputs remain valid. The setup actions and
+  artifact action use supported Node 24 runtimes; the application continues
+  to build with Java 17 and Node 20.
+- Not locally verifiable: a run on GitHub-hosted Ubuntu runners and their
+  external action/image download timing. Local Docker, REST, PostgreSQL,
+  migrations, export, and pytest paths all passed. No commit or push was made.
+
 ## 2026-11-14 — PostgreSQL to Pandas to CSV pipeline
 
 ### Read-only inspection before changes

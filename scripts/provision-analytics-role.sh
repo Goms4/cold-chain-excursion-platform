@@ -2,6 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 db_host="${DB_HOST:-localhost}" db_port="${DB_PORT:-5432}" db_name="${DB_NAME:-cold_chain}"
+admin_database="${COLDCHAIN_PROVISIONER_DATABASE:-postgres}"
 admin_user="${COLDCHAIN_PROVISIONER_USER:-${PGUSER:-${USER}}}"
 if [[ -z "${ANALYTICS_DB_PASSWORD:-}" && -f "$root/data-pipeline/.env" ]]; then
   set -a
@@ -23,7 +24,7 @@ path.chmod(0o600)
 PY
 fi
 export PGPASSWORD="${COLDCHAIN_PROVISIONER_PASSWORD:-${PGPASSWORD:-}}"
-psql -X -h "$db_host" -p "$db_port" -U "$admin_user" -d postgres \
+psql -X -h "$db_host" -p "$db_port" -U "$admin_user" -d "$admin_database" \
   -v ON_ERROR_STOP=1 -v analytics_password="$ANALYTICS_DB_PASSWORD" <<'SQL'
 SELECT format('CREATE ROLE coldchain_analytics WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5 PASSWORD %L', :'analytics_password')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='coldchain_analytics')
@@ -37,7 +38,7 @@ DO $$ DECLARE membership record; BEGIN
   LOOP EXECUTE format('REVOKE %I FROM coldchain_analytics', membership.rolname); END LOOP;
 END $$;
 SQL
-PGPASSWORD="${COLDCHAIN_PROVISIONER_PASSWORD:-${PGPASSWORD:-}}" psql -X -h "$db_host" -p "$db_port" -U "$admin_user" -d postgres \
+PGPASSWORD="${COLDCHAIN_PROVISIONER_PASSWORD:-${PGPASSWORD:-}}" psql -X -h "$db_host" -p "$db_port" -U "$admin_user" -d "$admin_database" \
   -v ON_ERROR_STOP=1 -v db_name="$db_name" <<'SQL'
 SELECT format('REVOKE ALL ON DATABASE %I FROM coldchain_analytics', :'db_name')
 \gexec

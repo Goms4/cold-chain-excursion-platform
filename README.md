@@ -26,6 +26,57 @@ A demonstrable pharmaceutical temperature-excursion command platform built as a 
 
 ## Quick Start Instructions
 
+### How CI works
+
+The `python-test` job uses an isolated PostgreSQL 17 service and per-run
+throwaway passwords. It provisions `coldchain_admin`, `coldchain_migrator`,
+`coldchain_app`, and `coldchain_analytics`; Flyway runs as the migrator while
+the backend starts with the app role. Only after the backend is healthy (and
+V1–V12 have run, including V11's analytics views) does CI grant the analytics
+role read access. The existing authenticated REST demo seed then populates the
+database, and the Pandas pipeline exports a timestamped CSV snapshot and
+`data-pipeline/output/LATEST` as `coldchain_analytics`. Pytest runs against
+that real output and fails if any test was skipped. The Docker image job waits
+for the backend, frontend, and pipeline jobs to pass.
+
+### Run the CI pipeline bootstrap locally
+
+Use a throwaway PostgreSQL 17 container and a non-default port. These commands
+do not read or write the local `data-pipeline/.env` file or connect to the
+usual local port 5432. They require Docker, Java 17/Maven, Python 3.14.2,
+`psql`/`pg_isready`, `curl`, `jq`, and Node.js:
+
+```bash
+export COLDCHAIN_PROVISIONER_USER=ci_bootstrap
+export COLDCHAIN_PROVISIONER_PASSWORD="$(openssl rand -hex 32)"
+export COLDCHAIN_ADMIN_PASSWORD="$(openssl rand -hex 32)"
+export COLDCHAIN_MIGRATOR_PASSWORD="$(openssl rand -hex 32)"
+export COLDCHAIN_APP_PASSWORD="$(openssl rand -hex 32)"
+export ANALYTICS_DB_PASSWORD="$(openssl rand -hex 32)"
+export COLDLATCH_OPERATIONS_PASSWORD="$(openssl rand -hex 32)"
+export COLDLATCH_ANALYST_PASSWORD="$(openssl rand -hex 32)"
+docker run --detach --name coldlatch-ci-pg-local \
+  --env POSTGRES_USER=ci_bootstrap \
+  --env POSTGRES_PASSWORD="$COLDCHAIN_PROVISIONER_PASSWORD" \
+  --env POSTGRES_DB=coldlatch_ci_bootstrap \
+  --publish 127.0.0.1:55432:5432 postgres:17
+export PGHOST=127.0.0.1 PGPORT=55432
+export PGDATABASE=coldlatch_ci_local
+export DB_HOST="$PGHOST" DB_PORT="$PGPORT" DB_NAME="$PGDATABASE"
+export COLDCHAIN_PROVISIONER_DATABASE=coldlatch_ci_bootstrap
+export SERVER_PORT=18080 COLDLATCH_API_URL=http://127.0.0.1:18080
+mvn -B -f backend/pom.xml -DskipTests package
+python3 -m pip install -r data-pipeline/requirements.txt
+scripts/ci-pipeline-env.sh
+(cd data-pipeline && python3 -m pytest -q -rs -ra)
+docker rm --force coldlatch-ci-pg-local
+```
+
+The generated passwords stay in the current shell environment. Remove those
+variables after the disposable database is stopped. The bootstrap starts and
+stops the backend itself; it creates the seed records through the existing
+REST API and then runs the existing direct PostgreSQL export pipeline.
+
 ### Demo login
 
 The local/demo profile reads login credentials from

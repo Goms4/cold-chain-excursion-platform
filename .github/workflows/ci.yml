@@ -6,88 +6,245 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: coldlatch-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  ci-credentials:
+    name: Generate ephemeral CI credentials
+    runs-on: ubuntu-latest
+    outputs:
+      postgres_password: ${{ steps.passwords.outputs.postgres_password }}
+      admin_password: ${{ steps.passwords.outputs.admin_password }}
+      migrator_password: ${{ steps.passwords.outputs.migrator_password }}
+      app_password: ${{ steps.passwords.outputs.app_password }}
+      analytics_password: ${{ steps.passwords.outputs.analytics_password }}
+      operations_password: ${{ steps.passwords.outputs.operations_password }}
+      analyst_password: ${{ steps.passwords.outputs.analyst_password }}
+    steps:
+      - id: passwords
+        name: Generate per-run passwords
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in postgres admin migrator app analytics operations analyst; do
+            value="$(openssl rand -hex 32)"
+            printf '%s_password=%s\n' "$name" "$value" >> "$GITHUB_OUTPUT"
+            unset value
+          done
+
   backend-test:
     name: Backend Build & Test (Java 17)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v7
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
-
+          distribution: temurin
+          cache: maven
       - name: Build and Test with Maven
-        run: |
-          cd backend
-          mvn clean test
+        run: mvn -B -f backend/pom.xml clean test
 
   frontend-build:
     name: Frontend Build (React + Vite)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v7
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
-
       - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
-
+        working-directory: frontend
+        run: npm ci
       - name: Build Production Bundle
-        run: |
-          cd frontend
-          npm run build
+        working-directory: frontend
+        run: npm run build
 
   python-test:
-    name: Data Pipeline Tests (Python)
+    name: Data Pipeline Tests (Python + PostgreSQL 17)
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
+    needs: [ci-credentials]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci_bootstrap
+          POSTGRES_PASSWORD: ${{ needs.ci-credentials.outputs.postgres_password }}
+          POSTGRES_DB: coldlatch_ci_bootstrap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_bootstrap -d coldlatch_ci_bootstrap"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/checkout@v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14.2'
+          cache: pip
           cache-dependency-path: data-pipeline/requirements.txt
-
-      - name: Install dependencies
+      - name: Set up Node.js for the REST demo seed
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: Mask and export ephemeral credentials
+        env:
+          CI_POSTGRES_PASSWORD: ${{ needs.ci-credentials.outputs.postgres_password }}
+          CI_ADMIN_PASSWORD: ${{ needs.ci-credentials.outputs.admin_password }}
+          CI_MIGRATOR_PASSWORD: ${{ needs.ci-credentials.outputs.migrator_password }}
+          CI_APP_PASSWORD: ${{ needs.ci-credentials.outputs.app_password }}
+          CI_ANALYTICS_PASSWORD: ${{ needs.ci-credentials.outputs.analytics_password }}
+          CI_OPERATIONS_PASSWORD: ${{ needs.ci-credentials.outputs.operations_password }}
+          CI_ANALYST_PASSWORD: ${{ needs.ci-credentials.outputs.analyst_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for secret in "$CI_POSTGRES_PASSWORD" "$CI_ADMIN_PASSWORD" "$CI_MIGRATOR_PASSWORD" "$CI_APP_PASSWORD" "$CI_ANALYTICS_PASSWORD" "$CI_OPERATIONS_PASSWORD" "$CI_ANALYST_PASSWORD"; do
+            echo "::add-mask::$secret"
+          done
+          {
+            echo "COLDCHAIN_PROVISIONER_USER=ci_bootstrap"
+            echo "COLDCHAIN_PROVISIONER_PASSWORD=$CI_POSTGRES_PASSWORD"
+            echo "COLDCHAIN_ADMIN_PASSWORD=$CI_ADMIN_PASSWORD"
+            echo "COLDCHAIN_MIGRATOR_PASSWORD=$CI_MIGRATOR_PASSWORD"
+            echo "COLDCHAIN_APP_PASSWORD=$CI_APP_PASSWORD"
+            echo "ANALYTICS_DB_PASSWORD=$CI_ANALYTICS_PASSWORD"
+            echo "COLDLATCH_OPERATIONS_PASSWORD=$CI_OPERATIONS_PASSWORD"
+            echo "COLDLATCH_ANALYST_PASSWORD=$CI_ANALYST_PASSWORD"
+            echo "COLDCHAIN_PROVISIONER_DATABASE=coldlatch_ci_bootstrap"
+            echo "PGHOST=127.0.0.1"
+            echo "PGPORT=5432"
+            echo "PGDATABASE=coldlatch_ci_${GITHUB_RUN_ID}_a${GITHUB_RUN_ATTEMPT}"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=5432"
+            echo "DB_NAME=coldlatch_ci_${GITHUB_RUN_ID}_a${GITHUB_RUN_ATTEMPT}"
+            echo "CI_BACKEND_LOG=$RUNNER_TEMP/coldlatch-backend.log"
+            echo "CI_BACKEND_PID_FILE=$RUNNER_TEMP/coldlatch-backend.pid"
+            echo "COLDLATCH_API_URL=http://127.0.0.1:8080"
+          } >> "$GITHUB_ENV"
+      - name: Ensure PostgreSQL client is installed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null || ! command -v pg_isready >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          command -v psql
+          command -v pg_isready
+      - name: Build backend jar
+        run: mvn -B -f backend/pom.xml -DskipTests package
+      - name: Install pipeline dependencies
         working-directory: data-pipeline
-        run: pip install -r requirements.txt
-
-      - name: Run pipeline tests
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Bootstrap database, seed, and export snapshot
+        run: scripts/ci-pipeline-env.sh
+      - name: Run pipeline tests (no skips)
         working-directory: data-pipeline
-        run: pytest -q
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q -rs -ra --junitxml="$RUNNER_TEMP/pipeline-tests.xml" | tee "$RUNNER_TEMP/pipeline-pytest.log"
+          python - "$RUNNER_TEMP/pipeline-tests.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          skipped = sum(int(case.attrib.get('skipped', 0)) for case in root.iter('testsuite'))
+          if skipped:
+              raise SystemExit(f"Pipeline suite must not skip tests; skipped={skipped}")
+          print("Skipped tests: 0")
+          PY
+      - name: Failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo '--- redacted backend log tail ---'
+          if [[ -f "$CI_BACKEND_LOG" ]]; then tail -n 100 "$CI_BACKEND_LOG"; else echo 'backend log not created'; fi
+          echo '--- PostgreSQL roles ---'
+          PGPASSWORD="$COLDCHAIN_PROVISIONER_PASSWORD" psql -X -h "$PGHOST" -p "$PGPORT" -U "$COLDCHAIN_PROVISIONER_USER" -d "$COLDCHAIN_PROVISIONER_DATABASE" -c '\du'
+          echo '--- pipeline output files ---'
+          ls -R data-pipeline/output
+      - id: artifact-scan
+        name: Check failure artifacts for credentials
+        if: failure()
+        env:
+          CI_POSTGRES_PASSWORD: ${{ needs.ci-credentials.outputs.postgres_password }}
+          CI_ADMIN_PASSWORD: ${{ needs.ci-credentials.outputs.admin_password }}
+          CI_MIGRATOR_PASSWORD: ${{ needs.ci-credentials.outputs.migrator_password }}
+          CI_APP_PASSWORD: ${{ needs.ci-credentials.outputs.app_password }}
+          CI_ANALYTICS_PASSWORD: ${{ needs.ci-credentials.outputs.analytics_password }}
+          CI_OPERATIONS_PASSWORD: ${{ needs.ci-credentials.outputs.operations_password }}
+          CI_ANALYST_PASSWORD: ${{ needs.ci-credentials.outputs.analyst_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$CI_BACKEND_LOG" data-pipeline/output <<'PY'
+          import os, pathlib, re, sys
+          secrets = [os.environ[name] for name in (
+              'CI_POSTGRES_PASSWORD', 'CI_ADMIN_PASSWORD', 'CI_MIGRATOR_PASSWORD',
+              'CI_APP_PASSWORD', 'CI_ANALYTICS_PASSWORD', 'CI_OPERATIONS_PASSWORD',
+              'CI_ANALYST_PASSWORD') if os.environ.get(name)]
+          paths = [pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])]
+          token_patterns = (
+              re.compile(rb'(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}'),
+              re.compile(rb'(?i)\b(?:JSESSIONID|XSRF-TOKEN)\s*[=:]\s*[A-Za-z0-9._~+/=-]{16,}'),
+          )
+          leaked = False
+          for path in paths:
+              candidates = [path] if path.is_file() else list(path.rglob('*')) if path.exists() else []
+              for candidate in candidates:
+                  if candidate.is_file():
+                      content = candidate.read_bytes()
+                      if any(secret.encode() in content for secret in secrets) or any(pattern.search(content) for pattern in token_patterns):
+                          print(f'Credential scan failed for {candidate}')
+                          leaked = True
+          if leaked:
+              raise SystemExit(1)
+          print('Credential scan passed; diagnostics contain no generated password values.')
+          PY
+          echo 'safe=true' >> "$GITHUB_OUTPUT"
+      - name: Upload failure diagnostics
+        if: failure() && steps.artifact-scan.outputs.safe == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coldlatch-ci-diagnostics
+          path: |
+            ${{ runner.temp }}/coldlatch-backend.log
+            data-pipeline/output/
+          if-no-files-found: warn
+          retention-days: 7
 
   docker-build:
     name: Docker Images Build Verification
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-build,python-test]
-
+    needs: [backend-test, frontend-build, python-test]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v7
       - name: Build Backend Image
-        run: |
-          docker build -t cold-chain-backend:latest ./backend
-
+        run: docker build -t cold-chain-backend:latest ./backend
       - name: Build Frontend Image
-        run: |
-          docker build -t cold-chain-frontend:latest ./frontend
+        run: docker build -t cold-chain-frontend:latest ./frontend

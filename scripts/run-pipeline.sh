@@ -2,7 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 pipeline="$root/data-pipeline"
-if [[ -f "$pipeline/.env" ]]; then
+if [[ "${COLDLATCH_SKIP_PIPELINE_DOTENV:-false}" != true && -f "$pipeline/.env" ]]; then
   set -a
   # This ignored file is a shell-compatible local environment file.
   source "$pipeline/.env"
