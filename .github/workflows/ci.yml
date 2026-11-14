@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHON_VERSION: '3.14'
+
 concurrency:
   group: coldlatch-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -76,6 +79,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [ci-credentials]
+    env:
+      CI_BACKEND_LOG: /tmp/coldlatch-ci-backend.log
+      CI_BACKEND_PID_FILE: /tmp/coldlatch-ci-backend.pid
+      CI_PIPELINE_OUTPUT: data-pipeline/output
+      COLDCHAIN_PROVISIONER_USER: ci_bootstrap
+      COLDCHAIN_PROVISIONER_DATABASE: coldlatch_ci_bootstrap
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGDATABASE: coldlatch_ci_${{ github.run_id }}_a${{ github.run_attempt }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_NAME: coldlatch_ci_${{ github.run_id }}_a${{ github.run_attempt }}
+      COLDLATCH_API_URL: http://127.0.0.1:8080
     services:
       postgres:
         image: postgres:17
@@ -91,6 +107,15 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      - name: Print environment
+        run: |
+          cat /etc/os-release
+          python --version
+          pip --version
+          java -version
+          node --version
+          psql --version
+          docker --version
       - name: Checkout repository
         uses: actions/checkout@v7
       - name: Set up JDK 17
@@ -102,7 +127,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.14.2'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: data-pipeline/requirements.txt
       - name: Set up Node.js for the REST demo seed
@@ -125,7 +150,6 @@ jobs:
             echo "::add-mask::$secret"
           done
           {
-            echo "COLDCHAIN_PROVISIONER_USER=ci_bootstrap"
             echo "COLDCHAIN_PROVISIONER_PASSWORD=$CI_POSTGRES_PASSWORD"
             echo "COLDCHAIN_ADMIN_PASSWORD=$CI_ADMIN_PASSWORD"
             echo "COLDCHAIN_MIGRATOR_PASSWORD=$CI_MIGRATOR_PASSWORD"
@@ -133,16 +157,6 @@ jobs:
             echo "ANALYTICS_DB_PASSWORD=$CI_ANALYTICS_PASSWORD"
             echo "COLDLATCH_OPERATIONS_PASSWORD=$CI_OPERATIONS_PASSWORD"
             echo "COLDLATCH_ANALYST_PASSWORD=$CI_ANALYST_PASSWORD"
-            echo "COLDCHAIN_PROVISIONER_DATABASE=coldlatch_ci_bootstrap"
-            echo "PGHOST=127.0.0.1"
-            echo "PGPORT=5432"
-            echo "PGDATABASE=coldlatch_ci_${GITHUB_RUN_ID}_a${GITHUB_RUN_ATTEMPT}"
-            echo "DB_HOST=127.0.0.1"
-            echo "DB_PORT=5432"
-            echo "DB_NAME=coldlatch_ci_${GITHUB_RUN_ID}_a${GITHUB_RUN_ATTEMPT}"
-            echo "CI_BACKEND_LOG=$RUNNER_TEMP/coldlatch-backend.log"
-            echo "CI_BACKEND_PID_FILE=$RUNNER_TEMP/coldlatch-backend.pid"
-            echo "COLDLATCH_API_URL=http://127.0.0.1:8080"
           } >> "$GITHUB_ENV"
       - name: Ensure PostgreSQL client is installed
         shell: bash
@@ -178,15 +192,16 @@ jobs:
           PY
       - name: Failure diagnostics
         if: failure()
-        shell: bash
-        run: |
-          set +e
-          echo '--- redacted backend log tail ---'
-          if [[ -f "$CI_BACKEND_LOG" ]]; then tail -n 100 "$CI_BACKEND_LOG"; else echo 'backend log not created'; fi
-          echo '--- PostgreSQL roles ---'
-          PGPASSWORD="$COLDCHAIN_PROVISIONER_PASSWORD" psql -X -h "$PGHOST" -p "$PGPORT" -U "$COLDCHAIN_PROVISIONER_USER" -d "$COLDCHAIN_PROVISIONER_DATABASE" -c '\du'
-          echo '--- pipeline output files ---'
-          ls -R data-pipeline/output
+        env:
+          CI_POSTGRES_PASSWORD: ${{ needs.ci-credentials.outputs.postgres_password }}
+          CI_ADMIN_PASSWORD: ${{ needs.ci-credentials.outputs.admin_password }}
+          CI_MIGRATOR_PASSWORD: ${{ needs.ci-credentials.outputs.migrator_password }}
+          CI_APP_PASSWORD: ${{ needs.ci-credentials.outputs.app_password }}
+          CI_ANALYTICS_PASSWORD: ${{ needs.ci-credentials.outputs.analytics_password }}
+          CI_OPERATIONS_PASSWORD: ${{ needs.ci-credentials.outputs.operations_password }}
+          CI_ANALYST_PASSWORD: ${{ needs.ci-credentials.outputs.analyst_password }}
+        shell: bash {0}
+        run: scripts/ci-diagnostics.sh
       - id: artifact-scan
         name: Check failure artifacts for credentials
         if: failure()
@@ -232,9 +247,9 @@ jobs:
         with:
           name: coldlatch-ci-diagnostics
           path: |
-            ${{ runner.temp }}/coldlatch-backend.log
-            data-pipeline/output/
-          if-no-files-found: warn
+            ${{ env.CI_BACKEND_LOG }}
+            ${{ env.CI_PIPELINE_OUTPUT }}
+          if-no-files-found: ignore
           retention-days: 7
 
   docker-build:

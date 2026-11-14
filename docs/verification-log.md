@@ -1,5 +1,86 @@
 # Verification log
 
+## 2026-11-14 — Ubuntu 26.04 Python setup failure
+
+### Python version root cause and replacement
+
+- The only project references to Python were `.github/workflows/ci.yml`'s
+  `python-version: '3.14.2'` and the README local bootstrap prerequisite
+  `Python 3.14.2`. No `.python-version`, `.tool-versions`, Python matrix,
+  `pyproject.toml`, or `requires-python` constraint exists. The exact patch was
+  carried from the developer machine's Python 3.14.2 into CI; it was not a
+  project dependency requirement. Ubuntu 26.04's preinstalled runner Python
+  is 3.14.4, so the runner cache has no 3.14.2 entry.
+- Changed this once to workflow-level `PYTHON_VERSION: '3.14'` and made the
+  single `setup-python` step consume `${{ env.PYTHON_VERSION }}`. The live
+  `actions/python-versions` manifest contains CPython 3.14 Linux x64 builds
+  with `platform_version: 26.04` (3.14.6 through 3.14.10 in the manifest
+  inspected). `setup-python@v7` resolves a minor-only version to an available
+  patch. The project pins no Python runtime; pinned application packages work
+  with CPython 3.14. The README now says Python 3.14, not a patch version.
+- A binary-only pip download for CPython 3.14 x86_64 succeeded for every direct
+  and transitive requirement with `manylinux2014_x86_64`, `manylinux_2_24`,
+  `manylinux_2_27`, and `manylinux_2_28` platform tags. Direct packages were
+  `pandas 3.1.1`, `psycopg 3.3.2`, and `pytest 9.0.2`; the download also
+  resolved binary wheels for `numpy 2.5.4` and `psycopg-binary 3.3.2`, plus
+  pure-Python transitive wheels. Pandas' Linux wheel is tagged
+  `manylinux_2_24/2_28`, so the suggested single `manylinux2014` command alone
+  reports no pandas wheel; using the Ubuntu 26 compatible tags succeeded.
+  No dependency pins were changed.
+
+### Hosted-runner compatibility audit
+
+- `ci-credentials`: `ubuntu-latest`, no Actions setup step; uses the image's
+  Bash and OpenSSL to generate random one-run passwords.
+- `backend-test`: `ubuntu-latest`; `actions/checkout@v7`,
+  `actions/setup-java@v6` for Temurin Java 17 and Maven caching, then the
+  preinstalled Maven command. The 26.04 image lists Maven 3.9.15 and JDK 17.
+- `frontend-build`: `ubuntu-latest`; checkout v7 and setup-node v7 install
+  Node 20, then use npm for `npm ci` and the Vite build. There is no apt step.
+- `python-test`: `ubuntu-latest`; prints image/tool versions before checkout,
+  then checkout v7, setup-java v6, setup-python v7 with Python 3.14, and
+  setup-node v7 with Node 20 (needed by `demo-seed.sh`). It uses Maven to build
+  the JAR, pip to install the requirements, and Docker for the PostgreSQL 17
+  service. The only apt command is a conditional fallback for
+  `postgresql-client` if `psql` or `pg_isready` is absent. Ubuntu 26.04 includes
+  PostgreSQL 18.6 client tools; a Docker `ubuntu:26.04` apt proxy installed
+  `postgresql-client` 18.6, `openssl` 3.5.5, `curl` 8.18.0, and `jq` 1.8.1.
+  PostgreSQL 18 client tools connect to the PostgreSQL 17 service; the pipeline
+  uses psql/pg_isready, not pg_dump. The service health command uses the
+  PostgreSQL 17 image's own `pg_isready`, and connects to its mapped host port,
+  not a host Postgres server.
+- `docker-build`: `ubuntu-latest`; checkout v7 and the image-provided Docker
+  client/daemon for `docker build`. Ubuntu 26.04's runner image lists Docker
+  29.4.2. There is no apt step.
+- The Ubuntu 26.04 runner image lists Bash 5.3.9, Python 3.14.4, Node 24.21,
+  npm 11, Maven 3.9.15, Docker 29.4.2, PostgreSQL 18.6 tools, OpenSSL 3.5.5,
+  and jq 1.8.1. Setup actions then select Java 17, Node 20, and Python 3.14.
+  The local `ubuntu:26.04` Docker apt check ran on the Mac's ARM64 Docker
+  architecture; the official runner image software list provides the x64
+  versions. No GNU/BSD-incompatible shell flags were found in the CI scripts:
+  their `date`, `awk`, `sed`, `grep`, `mktemp`, and Bash usage is supported on
+  the Ubuntu runner. The Docker health service is independent of these host
+  tools.
+
+### Diagnostics failure root cause and fix
+
+- `CI_BACKEND_LOG`, `CI_BACKEND_PID_FILE`, and the output path were previously
+  appended to `GITHUB_ENV` by the credential step. A setup-python failure skips
+  that later step; the `if: failure()` diagnostics then expanded
+  `$CI_BACKEND_LOG` under nounset and masked the original failure.
+- These paths, the database host/port/name, and the API URL are now defined
+  once at `python-test` job scope. The bootstrap consumes the log, PID, and
+  output path values rather than defining a different CI path. Diagnostics
+  keep nounset enabled, use optional-variable defaults, redact password and
+  session-token forms before printing a log tail, and guard missing tools and
+  files. Only this diagnostic step uses a shell without `-e`; it handles each
+  failure locally and exits successfully. Artifact upload ignores missing
+  files.
+- Tested `scripts/ci-diagnostics.sh` in isolation with all path/password
+  variables unset and with explicit nonexistent log/output paths. Both runs
+  exited 0, printed the expected “backend log not created” and “pipeline output
+  not created” notes, and emitted no unbound-variable error.
+
 ## 2026-11-14 — Clean-checkout GitHub Actions pipeline bootstrap
 
 ### Root cause and read-only findings
@@ -360,3 +441,36 @@
 - `psql \\du`: `coldchain_app` and `coldchain_migrator` have no superuser attributes; `audit_history` owner is `coldchain_migrator`. Rollback-isolated tamper probe returned `tamper_detected=true`; afterward `scripts/audit-verify.sh` returned `Chain verified: 100 records`.
 - CSS static check: one `:root` token block, no gradient declarations, no shadow declarations beyond the global `box-shadow:none` reset, IBM Plex Mono globally, and square 1px controls with the numbered-step marker as the only circular exception. Sampled colors and AA contrast are in `docs/design-tokens.md`.
 - Built-in browser again returned: `Browser Use rejected this action due to browser security policy. Reason: A saved user permission setting blocks this action. Browser use could not acquire authority to observe page content. The origin approval gate did not grant access for http://localhost:3000. A saved permission or managed policy denies access.` No UI screenshots were captured and browser/e2e visual acceptance remains NOT PERFORMED. The policy explicitly disallowed Playwright/CDP as a workaround, so I stopped after that denial.
+
+### Local verification of the workflow fix
+
+- Ran the edited bootstrap from a clean temporary Git checkout with a fresh
+  PostgreSQL 17 Docker service on `127.0.0.1:55432`, backend port 18080,
+  per-run random credentials, no `data-pipeline/.env`, and a fresh output
+  directory. The application reported healthy; all twelve Flyway migrations
+  succeeded; demo data was created through the REST seed; dashboard, condition,
+  issue, audit, and pipeline cross-checks passed; and the export manifest
+  reported PASS for all datasets. PostgreSQL role checks showed the expected
+  `coldchain_admin` superuser and non-superuser app, migrator, and analytics
+  roles.
+- In that checkout, `python3 -m pytest -q -rs -ra` passed all five tests with
+  no skips. After removing only the temporary export directory, the same test
+  command failed three output-dependent tests with explicit `FileNotFoundError`
+  for `LATEST` (two independent tests passed), confirming absent output cannot
+  silently pass. The temporary PostgreSQL container was stopped afterward.
+- `mvn -q -f backend/pom.xml clean test` passed; `npm ci && npm run build`
+  passed; both backend and frontend Docker image builds passed. `bash -n` passed
+  for the two changed shell scripts, the workflow parsed as YAML, and
+  `git diff --check` passed. ShellCheck was not completed because installing it
+  in the Ubuntu container stalled while fetching apt metadata; no workflow or
+  application code depends on ShellCheck.
+- Backend Surefire reports show 23 tests total: 0 failures, 0 errors, 0 skips.
+  Diagnostics isolation was rerun with unset variables, missing paths, and a
+  synthetic log containing a dummy password, bearer token, and session cookie;
+  all runs exited 0 and the visible log tail contained only redacted values.
+  A changed-file scan found no literal credential patterns.
+- The npm install reported four dependency audit advisories (three moderate,
+  one high); package manifests/locks were not changed. This run did not access a
+  GitHub-hosted runner or trigger an Actions run; the next hosted run remains
+  the final confirmation against GitHub's live image rollout and action
+  downloads.

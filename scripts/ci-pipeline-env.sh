@@ -11,6 +11,8 @@ server_port="${SERVER_PORT:-8080}"
 api="${COLDLATCH_API_URL:-http://127.0.0.1:$server_port}"
 log="${CI_BACKEND_LOG:-${TMPDIR:-/tmp}/coldlatch-ci-backend.log}"
 pid_file="${CI_BACKEND_PID_FILE:-${TMPDIR:-/tmp}/coldlatch-ci-backend.pid}"
+output_setting="${CI_PIPELINE_OUTPUT:-$root/data-pipeline/output}"
+if [[ "$output_setting" == /* ]]; then output="$output_setting"; else output="$root/$output_setting"; fi
 timeout_seconds="${CI_WAIT_TIMEOUT_SECONDS:-120}"
 
 : "${bootstrap_user:?Set COLDCHAIN_PROVISIONER_USER to the temporary PostgreSQL bootstrap role}"
@@ -107,7 +109,6 @@ export PGHOST="$host" PGPORT="$port" PGDATABASE="$db" PGUSER=coldchain_analytics
 export COLDCHAIN_PROVISIONER_USER=coldchain_migrator COLDCHAIN_PROVISIONER_PASSWORD="$COLDCHAIN_MIGRATOR_PASSWORD"
 scripts/run-pipeline.sh
 
-output="$root/data-pipeline/output"
 [[ -s "$output/LATEST" ]] || { echo 'Pipeline did not create data-pipeline/output/LATEST' >&2; exit 1; }
 run_id="$(tr -d '\r\n' < "$output/LATEST")"
 snapshot="$output/$run_id"

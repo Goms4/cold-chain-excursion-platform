@@ -43,7 +43,7 @@ for the backend, frontend, and pipeline jobs to pass.
 
 Use a throwaway PostgreSQL 17 container and a non-default port. These commands
 do not read or write the local `data-pipeline/.env` file or connect to the
-usual local port 5432. They require Docker, Java 17/Maven, Python 3.14.2,
+usual local port 5432. They require Docker, Java 17/Maven, Python 3.14,
 `psql`/`pg_isready`, `curl`, `jq`, and Node.js:
 
 ```bash
