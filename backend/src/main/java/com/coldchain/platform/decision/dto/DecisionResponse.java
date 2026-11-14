@@ -2,13 +2,15 @@ package com.coldchain.platform.decision.dto;
 
 import com.coldchain.platform.decision.model.DecisionType;
 import com.coldchain.platform.decision.model.DispositionDecision;
+import com.coldchain.platform.common.BusinessIds;
 
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 
 public class DecisionResponse {
-    private Long id;
+    private String id;
+    private String decisionId;
     private String investigationId;
     private String excursionId;
     private DecisionType decision;
@@ -17,27 +19,35 @@ public class DecisionResponse {
     private String ruleVersion;
     private List<String> affectedLotIds;
     private Instant decidedAt;
+    private String decidedBy;
 
     public DecisionResponse() {}
 
     public static DecisionResponse fromEntity(DispositionDecision entity) {
         DecisionResponse dto = new DecisionResponse();
-        dto.setId(entity.getId());
-        dto.setInvestigationId(entity.getInvestigation().getId());
+        dto.setId(BusinessIds.decision(entity.getId()));
+        dto.setDecisionId(BusinessIds.decision(entity.getId()));
+        dto.setInvestigationId(BusinessIds.investigation(entity.getInvestigation().getId()));
         dto.setExcursionId(entity.getExcursion().getId());
         dto.setDecision(entity.getDecision());
         dto.setInvestigatorName(entity.getInvestigatorName());
         dto.setReason(entity.getReason());
         dto.setRuleVersion(entity.getRuleVersion());
         if (entity.getAffectedLotIds() != null) {
-            dto.setAffectedLotIds(Arrays.asList(entity.getAffectedLotIds().split(",")));
+            dto.setAffectedLotIds(Arrays.stream(entity.getAffectedLotIds().split(","))
+                    .map(BusinessIds::lot).toList());
         }
         dto.setDecidedAt(entity.getDecidedAt());
+        dto.setDecidedBy(entity.getInvestigatorName());
         return dto;
     }
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
+    public String getDecisionId() { return decisionId; }
+    public void setDecisionId(String decisionId) { this.decisionId = decisionId; }
+    public String getDecidedBy() { return decidedBy; }
+    public void setDecidedBy(String decidedBy) { this.decidedBy = decidedBy; }
 
     public String getInvestigationId() { return investigationId; }
     public void setInvestigationId(String investigationId) { this.investigationId = investigationId; }

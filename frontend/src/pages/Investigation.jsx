@@ -1,314 +1,98 @@
-import React, { useEffect, useState } from 'react';
-import { FileSearch, UserCheck, ShieldCheck, Plus, AlertCircle, Clock } from 'lucide-react';
-import { apiRequest } from '../api/client';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, ClipboardList, Thermometer } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { apiRequest, getActiveRole } from '../api/client';
+import SeverityMarker from '../components/SeverityMarker';
 import StatusBadge from '../components/StatusBadge';
-import EvidenceComparisonCard from '../components/EvidenceComparisonCard';
 import DispositionModal from '../components/DispositionModal';
+import EntityActivityTimeline from '../components/EntityActivityTimeline';
+import Modal from '../components/Modal';
+import { FormRow, MasterDetail, PageHeader } from '../components/EditorialUI';
+import EvidenceComparisonCard from '../components/EvidenceComparisonCard';
+
+const human = value => String(value || 'Unknown').replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase());
+const fmt = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
 export default function Investigation() {
-  const [investigations, setInvestigations] = useState([]);
-  const [selectedInv, setSelectedInv] = useState(null);
+  const role = getActiveRole();
+  const [items, setItems] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
   const [decisions, setDecisions] = useState([]);
-  const [showInspectionModal, setShowInspectionModal] = useState(false);
-  const [showDispositionModal, setShowDispositionModal] = useState(false);
+  const [sensorEvents, setSensorEvents] = useState([]);
+  const [filter, setFilter] = useState('OPEN');
+  const [busy, setBusy] = useState(false);
+  const [assignee, setAssignee] = useState('');
+  const [showDecision, setShowDecision] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
+  const [form, setForm] = useState({ inspectorName: '', inspectionTime: new Date().toISOString(), observedTemperatureC: '', packageIntegrityStatus: 'INTACT', visualCondition: '', notes: '' });
+  const [error, setError] = useState('');
 
-  // Manual inspection form state
-  const [inspectionForm, setInspectionForm] = useState({
-    inspectorName: 'Dr. Sarah Vance, QA Officer',
-    inspectionTime: new Date().toISOString(),
-    observedTemperatureC: '6.2',
-    packageIntegrityStatus: 'INTACT',
-    visualCondition: 'Dry ice container intact; package tamper seals fully unbreached',
-    notes: 'Secondary manual thermometer reading at receiving dock'
-  });
-
-  const loadData = async () => {
+  const load = useCallback(async () => {
     try {
-      const excs = await apiRequest('/api/excursions');
-      const invList = [];
-      for (const exc of excs) {
-        try {
-          const inv = await apiRequest(`/api/investigations/excursion/${exc.id}`);
-          inv.excursionData = exc;
-          invList.push(inv);
-        } catch (e) {
-          // No investigation yet
-        }
-      }
-      setInvestigations(invList);
-      if (invList.length > 0 && !selectedInv) {
-        selectInvestigation(invList[0]);
-      } else if (selectedInv) {
-        const updated = invList.find(i => i.id === selectedInv.id);
-        if (updated) selectInvestigation(updated);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const selectInvestigation = async (inv) => {
-    setSelectedInv(inv);
-    try {
-      const decs = await apiRequest(`/api/investigations/${inv.id}/decisions`);
-      setDecisions(decs || []);
-    } catch (e) {
-      setDecisions([]);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-    const listener = () => loadData();
-    window.addEventListener('cold_chain_refresh', listener);
-    return () => window.removeEventListener('cold_chain_refresh', listener);
+      setError('');
+      const excursions = await apiRequest('/api/excursions');
+      const responses = await Promise.all((excursions || []).map(exc => apiRequest(`/api/investigations/excursion/${exc.id}`).then(inv => ({ ...inv, issue: exc })).catch(() => null)));
+      const list = responses.filter(Boolean);
+      setItems(list);
+      setSelectedId(current => list.some(i => (i.investigationId || i.id) === current) ? current : (list[0]?.investigationId || list[0]?.id || ''));
+    } catch (e) { setError(e.message || 'Unable to load investigations.'); }
   }, []);
+  useEffect(() => { load(); window.addEventListener('cold_chain_refresh', load); return () => window.removeEventListener('cold_chain_refresh', load); }, [load]);
 
-  const handleAddInspection = async (e) => {
-    e.preventDefault();
+  const selected = items.find(i => (i.investigationId || i.id) === selectedId) || items[0];
+  useEffect(() => {
+    if (!selected) { setDecisions([]); setSensorEvents([]); return; }
+    apiRequest(`/api/investigations/${selected.investigationInternalId || selected.id}/decisions`).then(d => setDecisions(d || [])).catch(() => setDecisions([]));
+    apiRequest(`/api/shipments/${selected.shipmentId}/sensor-events`).then(events => setSensorEvents(events || [])).catch(() => setSensorEvents([]));
+  }, [selected?.investigationId, selected?.id, selected?.shipmentId]);
+  const visible = items.filter(item => filter === 'ALL' || (filter === 'OPEN' ? item.status !== 'COMPLETED' : item.status === 'COMPLETED'));
+
+  const addEvidence = async event => {
+    event.preventDefault(); setBusy(true); setError('');
     try {
-      await apiRequest(`/api/investigations/${selectedInv.id}/manual-inspection`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ...inspectionForm,
-          observedTemperatureC: parseFloat(inspectionForm.observedTemperatureC)
-        })
-      });
-      setShowInspectionModal(false);
-      loadData();
-    } catch (err) {
-      alert(err.message);
-    }
+      await apiRequest(`/api/investigations/${selected.investigationInternalId || selected.id}/manual-inspection`, { method: 'POST', body: JSON.stringify({ ...form, inspectorName: form.inspectorName || 'Operations', observedTemperatureC: Number(form.observedTemperatureC) }) });
+      setShowEvidence(false); await load();
+    } catch (e) { setError(e.message || 'Unable to add evidence.'); }
+    finally { setBusy(false); }
+  };
+  const assignInvestigator = async () => {
+    if (!selected || !assignee.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await apiRequest(`/api/investigations/${selected.investigationInternalId || selected.id}/assignee`, { method: 'PATCH', body: JSON.stringify({ investigator: assignee.trim() }) });
+      setAssignee(''); await load();
+    } catch (e) { setError(e.message || 'Unable to assign this investigation.'); }
+    finally { setBusy(false); }
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Pharmaceutical QA Investigations</h2>
-          <p className="text-xs text-clinical-muted">Independent evidence correlation, contradictory evidence review, and auditable lot disposition</p>
-        </div>
-      </div>
-
-      {investigations.length === 0 ? (
-        <div className="bg-white p-8 border border-clinical-border rounded-lg text-center text-slate-400 text-xs">
-          No investigations on record. Run Scenario 2, 3, or 6 above to generate an excursion investigation.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Investigation Queue Sidebar */}
-          <div className="bg-white border border-clinical-border rounded-lg overflow-hidden clinical-card lg:col-span-1">
-            <div className="px-4 py-3 border-b border-clinical-border bg-slate-50 flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Investigation Queue</span>
-              <span className="text-[11px] font-mono text-slate-500">{investigations.length} files</span>
-            </div>
-            <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-              {investigations.map((inv) => (
-                <div
-                  key={inv.id}
-                  onClick={() => selectInvestigation(inv)}
-                  className={`p-3.5 cursor-pointer transition text-xs ${
-                    selectedInv?.id === inv.id ? 'bg-slate-100/90 border-l-4 border-pharma-700' : 'hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono font-bold text-slate-900">{inv.id}</span>
-                    <StatusBadge status={inv.status} />
-                  </div>
-                  <div className="text-[11px] text-slate-600 mt-1">
-                    Shipment: <span className="font-mono">{inv.shipmentId}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2">
-                    <span className="flex items-center space-x-1">
-                      <Clock className="w-3 h-3" />
-                      <span>SLA: {new Date(inv.slaDueAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </span>
-                    <span>{inv.manualInspections?.length || 0} manual inspections</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Investigation File Detail */}
-          {selectedInv && (
-            <div className="lg:col-span-2 space-y-4">
-              {/* Header card */}
-              <div className="bg-white border border-clinical-border rounded-lg p-4 clinical-card flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h3 className="text-sm font-bold text-slate-900 font-mono">{selectedInv.id}</h3>
-                    <StatusBadge status={selectedInv.status} />
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Linked Excursion: <span className="font-mono">{selectedInv.excursionId}</span>
-                  </p>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setShowInspectionModal(true)}
-                    className="inline-flex items-center space-x-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 rounded text-xs font-semibold transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Manual Inspection</span>
-                  </button>
-
-                  {selectedInv.status !== 'COMPLETED' && (
-                    <button
-                      onClick={() => setShowDispositionModal(true)}
-                      className="inline-flex items-center space-x-1 px-3 py-1.5 bg-pharma-700 hover:bg-pharma-800 text-white rounded text-xs font-semibold shadow-sm transition"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      <span>Execute Disposition</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Side-by-side Evidence Comparison Card */}
-              <EvidenceComparisonCard
-                excursion={selectedInv.excursionData}
-                manualInspections={selectedInv.manualInspections || []}
-              />
-
-              {/* Historical Decisions Ledger */}
-              <div className="bg-white border border-clinical-border rounded-lg p-4 clinical-card">
-                <div className="flex items-center justify-between border-b border-clinical-border pb-2.5 mb-3">
-                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                    Append-Only Disposition Decisions ({decisions.length})
-                  </h4>
-                  <span className="text-[10px] text-slate-400 font-mono">Immutable Audit Record</span>
-                </div>
-
-                {decisions.length === 0 ? (
-                  <div className="text-slate-400 text-xs py-4 text-center">
-                    No disposition decision recorded yet. File remains in pending/active status.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {decisions.map((d) => (
-                      <div key={d.id} className="p-3 bg-slate-50 border border-slate-200 rounded text-xs space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900 flex items-center space-x-2">
-                            <span>Decision:</span>
-                            <StatusBadge status={d.decision} />
-                          </span>
-                          <span className="font-mono text-[11px] text-slate-500">
-                            {new Date(d.decidedAt).toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="text-slate-600">
-                          Investigator: <strong className="text-slate-800">{d.investigatorName}</strong> • Rule Set: <span className="font-mono">{d.ruleVersion}</span>
-                        </div>
-                        <div className="p-2 bg-white border border-slate-200 rounded text-slate-700 italic text-[11px]">
-                          "{d.reason}"
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-mono">
-                          Affected Lots: {d.affectedLotIds?.join(', ') || 'N/A'}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Manual Inspection Modal */}
-      {showInspectionModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg border border-clinical-border shadow-xl max-w-md w-full p-5 text-xs">
-            <h3 className="text-sm font-bold text-slate-900 mb-3">Record Physical Receiving Dock Inspection</h3>
-            <form onSubmit={handleAddInspection} className="space-y-3">
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Inspector Full Name & Title</label>
-                <input
-                  type="text"
-                  value={inspectionForm.inspectorName}
-                  onChange={(e) => setInspectionForm({ ...inspectionForm, inspectorName: e.target.value })}
-                  className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Measured Temperature (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={inspectionForm.observedTemperatureC}
-                    onChange={(e) => setInspectionForm({ ...inspectionForm, observedTemperatureC: e.target.value })}
-                    className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none font-mono"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Package Integrity</label>
-                  <select
-                    value={inspectionForm.packageIntegrityStatus}
-                    onChange={(e) => setInspectionForm({ ...inspectionForm, packageIntegrityStatus: e.target.value })}
-                    className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                  >
-                    <option value="INTACT">INTACT</option>
-                    <option value="DAMAGED">DAMAGED</option>
-                    <option value="SEAL_BROKEN">SEAL BROKEN</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Visual Observations</label>
-                <input
-                  type="text"
-                  value={inspectionForm.visualCondition}
-                  onChange={(e) => setInspectionForm({ ...inspectionForm, visualCondition: e.target.value })}
-                  className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Inspection Notes</label>
-                <textarea
-                  rows={2}
-                  value={inspectionForm.notes}
-                  onChange={(e) => setInspectionForm({ ...inspectionForm, notes: e.target.value })}
-                  className="w-full border border-slate-300 rounded p-2 focus:ring-1 focus:ring-pharma-700 outline-none"
-                />
-              </div>
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setShowInspectionModal(false)}
-                  className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 bg-pharma-700 hover:bg-pharma-800 text-white rounded font-medium"
-                >
-                  Preserve Inspection Evidence
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Disposition Modal */}
-      {showDispositionModal && (
-        <DispositionModal
-          investigationId={selectedInv.id}
-          ruleVersion={selectedInv.excursionData?.ruleVersion || 'v1.0.0'}
-          lotIds={selectedInv.excursionData?.affectedLotIds || []}
-          onClose={() => setShowDispositionModal(false)}
-          onSuccess={() => {
-            setShowDispositionModal(false);
-            loadData();
-          }}
-        />
-      )}
-    </div>
-  );
+  return <div className="page-stack">
+    <PageHeader breadcrumb="Quality › Investigations" title="Investigations" summary="Review temperature issues, evidence and shipment decisions." actions={<select className="form-select" value={filter} onChange={e=>setFilter(e.target.value)}><option value="OPEN">Open investigations</option><option value="ALL">All investigations</option><option value="DONE">Completed</option></select>} />
+    {error && <div className="alert-card error">{error}</div>}
+    {visible.length === 0 ? <section className="content-card empty-state"><span className="empty-icon"><ClipboardList size={20}/></span><strong>No investigations to show</strong><span>When a temperature issue is raised, its investigation will appear here.</span></section> : (
+      <MasterDetail>
+        <div className="panel-top-strip master-detail-strip"><span>Investigations › {selected?.investigationId || 'Open items'}</span><span className={items.filter(i=>i.status!=='COMPLETED').length ? 'problem-count' : ''}>{items.filter(i=>i.status!=='COMPLETED').length ? `● ${items.filter(i=>i.status!=='COMPLETED').length} to look at` : 'No open investigations'}</span></div>
+        <aside className="content-card investigation-list">{visible.map(item=>{
+          const key=item.investigationId||item.id; const active=key===(selected?.investigationId||selected?.id);
+          return <button key={key} className={`investigation-list-item ${active?'selected':''}`} onClick={()=>setSelectedId(key)}><span className="investigation-list-top"><SeverityMarker severity={item.severity || item.issue?.severity}/><StatusBadge status={item.status}/></span><strong>{item.shipmentId}</strong><span>{item.investigationId||item.id}</span><small>Started {fmt(item.startedAt||item.openedAt)}</small></button>;
+        })}</aside>
+        {selected && <section className="content-card investigation-detail">
+          <div className="section-heading"><div><span className="eyebrow">{selected.investigationId||selected.id}</span><h2>{selected.shipmentId}</h2><p>{human(selected.issueType)} · {human(selected.status)}</p></div><div className="button-row">{role==='OPERATIONS' && <button className="btn-secondary" onClick={()=>setShowEvidence(true)}><ClipboardList size={16}/> Add evidence</button>}{role==='ANALYST' && selected.status!=='COMPLETED' && <button className="btn-primary" onClick={()=>setShowDecision(true)}>Make shipment decision</button>}</div></div>
+          <div className="investigation-stage-line"><span>Detected</span><span>›</span><span>Investigation opened</span><span>›</span><span>{(selected.manualInspections||[]).length ? 'Evidence recorded' : 'Evidence pending'}</span><span>›</span><span>{decisions.length ? 'Decision recorded' : 'Decision pending'}</span></div>
+          <div className="investigation-facts"><div><span>Severity</span><strong><SeverityMarker severity={selected.severity||selected.issue?.severity}/></strong></div><div><span>Peak temperature</span><strong>{selected.peakTemperatureC ?? selected.issue?.peakTemperatureC ?? '—'}°C</strong></div><div><span>Time out of range</span><strong>{selected.durationMinutes ?? selected.issue?.durationMinutes ?? 0} min</strong></div><div><span>Assigned investigator</span><strong>{selected.investigator || selected.assignedInvestigator || 'Unassigned'}</strong></div></div>
+          {role === 'ANALYST' && selected.status !== 'COMPLETED' && <div className="investigator-assignment"><label className="search-box"><input value={assignee} onChange={event => setAssignee(event.target.value)} placeholder="Name of investigator" aria-label="Investigator name" /></label><button className="btn-secondary compact" disabled={busy || !assignee.trim()} onClick={assignInvestigator}>Assign investigator</button></div>}
+          <div className="section-subheading"><h3>Affected lots</h3><Link className="text-link" to={`/shipments/${selected.shipmentInternalId || selected.shipmentId}`}>Open shipment</Link></div>
+          <div className="lot-chip-list">{(selected.issue?.affectedLotIds||[]).map(lot=><span className="lot-chip" key={lot}>{lot}</span>)}</div>
+          <div className="section-subheading"><h3>Operational evidence</h3></div>
+          {(selected.manualInspections||[]).length===0 ? <p className="muted-copy">No additional evidence has been recorded.</p> : <div className="evidence-list">{selected.manualInspections.map((e,i)=><div className="evidence-row" key={`${e.inspectionTime}-${i}`}><div className="evidence-icon"><Thermometer size={17}/></div><div><strong>{e.observedTemperatureC}°C manual reading</strong><span>{e.inspectorName} · {fmt(e.inspectionTime)} · Package {human(e.packageIntegrityStatus)}</span>{e.visualCondition&&<p>{e.visualCondition}</p>}{e.notes&&<p>{e.notes}</p>}</div>{e.contradictsSensor&&<span className="quality-label other">Evidence differs</span>}</div>)}</div>}
+          <EvidenceComparisonCard events={sensorEvents} manualInspections={selected.manualInspections || []} />
+          {decisions.length>0 && <div className="decision-outcome"><span>Recorded shipment decision</span><strong>{decisions[decisions.length-1].decision}</strong><p>{decisions[decisions.length-1].reason}</p></div>}
+          {selected.issue && <div className="inline-issue-link"><AlertTriangle size={16}/><span>Temperature issue on this shipment</span><Link className="text-link" to={`/issues/${selected.issue.id}`}>Review issue</Link></div>}
+          <EntityActivityTimeline entityType="INVESTIGATION" entityId={selected.investigationInternalId || selected.id} />
+        </section>}
+      </MasterDetail>
+    )}
+    {showDecision&&<DispositionModal investigationId={selected.investigationInternalId||selected.id} lotIds={selected.issue?.affectedLotIds||[]} onClose={()=>setShowDecision(false)} onSuccess={async()=>{setShowDecision(false);await load();window.dispatchEvent(new CustomEvent('cold_chain_refresh'));}}/>}
+    {showEvidence&&<Modal title="Add operational evidence" onClose={()=>setShowEvidence(false)}><form onSubmit={addEvidence} className="form-stack"><div className="form-grid"><Field label="Observed temperature (°C)"><input className="form-input" type="number" step="0.1" required value={form.observedTemperatureC} onChange={e=>setForm({...form,observedTemperatureC:e.target.value})}/></Field><Field label="Package integrity"><select className="form-select full-width" value={form.packageIntegrityStatus} onChange={e=>setForm({...form,packageIntegrityStatus:e.target.value})}><option>INTACT</option><option>DAMAGED</option><option>UNKNOWN</option></select></Field></div><Field label="What did you observe?"><textarea className="form-textarea" rows="3" value={form.visualCondition} onChange={e=>setForm({...form,visualCondition:e.target.value})} placeholder="Describe packaging or product condition"/></Field><Field label="Notes"><textarea className="form-textarea" rows="3" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></Field>{error&&<div className="inline-error" role="alert">{error}</div>}<div className="modal-footer"><button type="button" className="btn-secondary" onClick={()=>setShowEvidence(false)}>Cancel</button><button className="btn-primary" disabled={busy}>{busy?'Saving…':'Save evidence'}</button></div></form></Modal>}
+  </div>;
 }
+function Field({label,children}){return <FormRow label={label}>{children}</FormRow>}

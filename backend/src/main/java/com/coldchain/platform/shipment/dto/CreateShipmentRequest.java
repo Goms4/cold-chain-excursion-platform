@@ -6,11 +6,13 @@ import jakarta.validation.constraints.NotNull;
 
 public class CreateShipmentRequest {
 
-    @NotBlank(message = "id is required")
     private String id;
 
-    @NotBlank(message = "tracking_number is required")
+    @NotBlank(message = "tracking number is required")
     private String trackingNumber;
+
+    @NotBlank(message = "shipment reference is required")
+    private String shipmentReference;
 
     @NotBlank(message = "origin is required")
     private String origin;
@@ -24,6 +26,7 @@ public class CreateShipmentRequest {
     private ShipmentStatus status = ShipmentStatus.PLANNED;
     private Integer expectedCadenceMinutes = 5;
     private Integer allowedLatenessMinutes = 120;
+    private java.time.Instant expectedDeliveryAt;
 
     public CreateShipmentRequest() {}
 
@@ -32,6 +35,8 @@ public class CreateShipmentRequest {
 
     public String getTrackingNumber() { return trackingNumber; }
     public void setTrackingNumber(String trackingNumber) { this.trackingNumber = trackingNumber; }
+    public String getShipmentReference() { return shipmentReference; }
+    public void setShipmentReference(String shipmentReference) { this.shipmentReference = shipmentReference; }
 
     public String getOrigin() { return origin; }
     public void setOrigin(String origin) { this.origin = origin; }
@@ -50,4 +55,7 @@ public class CreateShipmentRequest {
 
     public Integer getAllowedLatenessMinutes() { return allowedLatenessMinutes; }
     public void setAllowedLatenessMinutes(Integer allowedLatenessMinutes) { this.allowedLatenessMinutes = allowedLatenessMinutes; }
+
+    public java.time.Instant getExpectedDeliveryAt() { return expectedDeliveryAt; }
+    public void setExpectedDeliveryAt(java.time.Instant expectedDeliveryAt) { this.expectedDeliveryAt = expectedDeliveryAt; }
 }

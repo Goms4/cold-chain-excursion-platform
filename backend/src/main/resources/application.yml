@@ -1,13 +1,20 @@
 server:
   port: 8080
+  servlet:
+    session:
+      timeout: 8h
+      cookie:
+        http-only: true
+        same-site: strict
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 spring:
   application:
     name: cold-chain-platform
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cold_chain}
-    username: ${DB_USER:cold_chain}
-    password: ${DB_PASSWORD:cold_chain_secret}
+    username: ${DB_USER:coldchain_app}
+    password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -21,6 +28,8 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+    user: ${FLYWAY_USER:coldchain_migrator}
+    password: ${FLYWAY_PASSWORD:}
 
 management:
   endpoints:
@@ -32,9 +41,10 @@ management:
       show-details: always
 
 app:
-  jwt:
-    secret: ${JWT_SECRET:c3VwZXJfc2VjcmV0X2tleV9mb3Jfand0X3NpZ25pbmdfY29sZF9jaGFpbl8yMDI2}
-    expiration-ms: 86400000 # 24 hours
+  auth:
+    operations-password: ${COLDLATCH_OPERATIONS_PASSWORD:}
+    analyst-password: ${COLDLATCH_ANALYST_PASSWORD:}
+  frontend-origin: ${COLDLATCH_FRONTEND_ORIGIN:http://localhost:3000}
   rules:
     default-allowed-lateness-minutes: 120
     default-cadence-minutes: 5

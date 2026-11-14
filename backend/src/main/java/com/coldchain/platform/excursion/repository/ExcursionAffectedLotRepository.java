@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface ExcursionAffectedLotRepository extends JpaRepository<ExcursionAffectedLot, Long> {
     List<ExcursionAffectedLot> findByExcursionId(String excursionId);
+    boolean existsByLot_Id(String lotId);
 }

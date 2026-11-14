@@ -1,88 +1,86 @@
 import React from 'react';
-import { Settings, Shield, Sliders, Database } from 'lucide-react';
 
 const profiles = [
   {
     id: 'PROFILE-CRT',
-    name: 'Controlled Room / Ambient',
-    target: '15.0°C - 25.0°C',
-    minor: '25.1°C - 30.0°C (up to 240 mins)',
-    major: '30.1°C - 40.0°C (or minor > 240 mins)',
-    critical: '> 40.0°C or freezing breach (< 10°C)',
-    version: 'v1.0.0'
+    name: 'Controlled room / ambient',
+    target: '15.0–25.0°C',
+    minor: '25.1–30.0°C (up to 240 min)',
+    major: '30.1–40.0°C or minor > 240 min',
+    critical: '> 40.0°C or freeze (< 10°C)',
+    version: 'v1.0.0',
   },
   {
     id: 'PROFILE-COOL',
     name: 'Cool',
-    target: '8.0°C - 15.0°C',
-    minor: '15.1°C - 20.0°C (up to 180 mins)',
-    major: '20.1°C - 25.0°C',
-    critical: '> 25.0°C or freezing breach (< 3°C)',
-    version: 'v1.0.0'
+    target: '8.0–15.0°C',
+    minor: '15.1–20.0°C (up to 180 min)',
+    major: '20.1–25.0°C',
+    critical: '> 25.0°C or freeze (< 3°C)',
+    version: 'v1.0.0',
   },
   {
     id: 'PROFILE-REF',
     name: 'Refrigerated',
-    target: '2.0°C - 8.0°C',
-    minor: '8.1°C - 12.0°C (up to 120 mins)',
-    major: '12.1°C - 20.0°C',
-    critical: '> 20.0°C or freeze condition (< 0°C)',
-    version: 'v1.0.0'
+    target: '2.0–8.0°C',
+    minor: '8.1–12.0°C (up to 120 min)',
+    major: '12.1–20.0°C',
+    critical: '> 20.0°C or freeze (< 0°C)',
+    version: 'v1.0.0',
   },
   {
     id: 'PROFILE-FRZ',
     name: 'Frozen',
-    target: '-25.0°C to -10.0°C',
-    minor: '-9.9°C to -5.0°C (up to 60 mins)',
-    major: '-4.9°C to 0.0°C',
-    critical: '> 0.0°C (Thaw condition)',
-    version: 'v1.0.0'
-  }
+    target: '−25.0 to −10.0°C',
+    minor: '−9.9 to −5.0°C (up to 60 min)',
+    major: '−4.9 to 0.0°C',
+    critical: '> 0.0°C (thaw condition)',
+    version: 'v1.0.0',
+  },
 ];
+
+function Row({ label, value }) {
+  return (
+    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+      <td style={{ padding: '8px 16px', color: 'var(--text-muted)', fontSize: 13, width: '45%' }}>{label}</td>
+      <td style={{ padding: '8px 16px', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}>{value}</td>
+    </tr>
+  );
+}
 
 export default function AdminConfig() {
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+      <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--text)' }}>Configuration</h1>
+
+      {/* Storage profiles table */}
       <div>
-        <h2 className="text-lg font-bold text-slate-900 tracking-tight">System & Storage Profile Configuration</h2>
-        <p className="text-xs text-clinical-muted">Authoritative pharmaceutical storage profiles, telemetry cadence definitions, and watermark thresholds</p>
-      </div>
-
-      {/* Storage Profiles Table */}
-      <div className="bg-white border border-clinical-border rounded-lg overflow-hidden clinical-card">
-        <div className="px-5 py-3.5 border-b border-clinical-border bg-slate-50 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Shield className="w-4 h-4 text-pharma-700" />
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Configured Pharmaceutical Storage Profiles
-            </h3>
-          </div>
-          <span className="text-[11px] font-mono text-slate-500">Flyway Seeded • Versioned</span>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>
+          Storage profiles
         </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+        <div className="panel" style={{ overflowX: 'auto' }}>
+          <table className="data-table">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/50 text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-                <th className="py-2.5 px-4">Profile ID</th>
-                <th className="py-2.5 px-4">Name</th>
-                <th className="py-2.5 px-4 text-emerald-800">Target Safe Band</th>
-                <th className="py-2.5 px-4 text-amber-800">Minor Excursion</th>
-                <th className="py-2.5 px-4 text-orange-800">Major Excursion</th>
-                <th className="py-2.5 px-4 text-rose-800">Critical Breach</th>
-                <th className="py-2.5 px-4 text-right">Rule Version</th>
+              <tr>
+                <th>Profile</th>
+                <th>Name</th>
+                <th>Target range</th>
+                <th>Minor excursion</th>
+                <th>Major excursion</th>
+                <th>Critical breach</th>
+                <th>Rule version</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {profiles.map((p) => (
-                <tr key={p.id} className="hover:bg-slate-50/80 transition">
-                  <td className="py-3 px-4 font-mono font-semibold text-slate-900">{p.id}</td>
-                  <td className="py-3 px-4 font-medium text-slate-800">{p.name}</td>
-                  <td className="py-3 px-4 font-mono font-bold text-emerald-700 bg-emerald-50/40">{p.target}</td>
-                  <td className="py-3 px-4 font-mono text-amber-800">{p.minor}</td>
-                  <td className="py-3 px-4 font-mono text-orange-800">{p.major}</td>
-                  <td className="py-3 px-4 font-mono text-rose-700 font-bold">{p.critical}</td>
-                  <td className="py-3 px-4 font-mono text-slate-500 text-right">{p.version}</td>
+            <tbody>
+              {profiles.map(p => (
+                <tr key={p.id}>
+                  <td><span className="mono" style={{ fontSize: 12 }}>{p.id}</span></td>
+                  <td style={{ fontSize: 13 }}>{p.name}</td>
+                  <td><span className="mono" style={{ fontSize: 12 }}>{p.target}</span></td>
+                  <td style={{ fontSize: 12, color: 'var(--sev-minor)' }}>{p.minor}</td>
+                  <td style={{ fontSize: 12, color: 'var(--sev-major)' }}>{p.major}</td>
+                  <td style={{ fontSize: 12, color: 'var(--sev-critical)' }}>{p.critical}</td>
+                  <td><span className="mono" style={{ fontSize: 12 }}>{p.version}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -90,68 +88,43 @@ export default function AdminConfig() {
         </div>
       </div>
 
-      {/* Global Watermark & Telemetry Parameters */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white border border-clinical-border rounded-lg p-5 clinical-card">
-          <div className="flex items-center space-x-2 border-b border-clinical-border pb-3 mb-3">
-            <Sliders className="w-4 h-4 text-pharma-700" />
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Event-Time & Telemetry Rules
-            </h3>
-          </div>
-          <div className="space-y-3 text-xs">
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Authoritative Clock:</span>
-              <span className="font-mono font-semibold text-slate-900">event_time (Sensor Measured)</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Platform Ingestion Clock:</span>
-              <span className="font-mono text-slate-600">ingestion_time (Retained separately)</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Default Expected Cadence:</span>
-              <span className="font-mono font-semibold text-purple-700">5 minutes (Gaps &gt; 6m = UNKNOWN)</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Allowed Lateness Watermark:</span>
-              <span className="font-mono font-semibold text-rose-700">120 minutes (Quarantined if breached)</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Duplicate Event Policy:</span>
-              <span className="font-mono text-indigo-700">Retained in raw, suppressed from incidents</span>
-            </div>
-          </div>
+      {/* Thresholds */}
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>Thresholds</div>
+        <div className="panel">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <Row label="Authoritative clock" value="event_time (sensor measured)" />
+              <Row label="Ingestion clock" value="ingestion_time (retained separately)" />
+            </tbody>
+          </table>
         </div>
+      </div>
 
-        <div className="bg-white border border-clinical-border rounded-lg p-5 clinical-card">
-          <div className="flex items-center space-x-2 border-b border-clinical-border pb-3 mb-3">
-            <Database className="w-4 h-4 text-pharma-700" />
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Architecture & Stack Constraints
-            </h3>
-          </div>
-          <div className="space-y-3 text-xs">
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Operational Runtime:</span>
-              <span className="font-mono font-semibold text-slate-900">Java 17 • Spring Boot Modular Monolith</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Relational Store:</span>
-              <span className="font-mono text-slate-700">PostgreSQL 17 (Flyway versioned)</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Analytical Warehouse:</span>
-              <span className="font-mono text-slate-700">Snowflake (DIM / FACT model)</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-2">
-              <span className="text-slate-600">Security Model:</span>
-              <span className="font-mono text-slate-700">Stateless JWT (ADMIN, OPERATIONS, ANALYST)</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Audit Trail:</span>
-              <span className="font-mono text-emerald-700 font-semibold">Strictly Append-Only Ledger</span>
-            </div>
-          </div>
+      {/* Sampling */}
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>Sampling</div>
+        <div className="panel">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <Row label="Default cadence" value="5 min (gaps > 6 min → Unknown)" />
+              <Row label="Duplicate policy" value="Retained in raw, suppressed from incidents" />
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Late-event window */}
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>Late-event window</div>
+        <div className="panel">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <Row label="Allowed lateness watermark" value="120 min (quarantined if exceeded)" />
+              <Row label="Security model" value="Eight-hour session — OPERATIONS, ANALYST" />
+              <Row label="Audit trail" value="Strictly append-only" />
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

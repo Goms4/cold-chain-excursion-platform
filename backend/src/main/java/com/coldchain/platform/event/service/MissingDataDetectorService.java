@@ -50,7 +50,7 @@ public class MissingDataDetectorService {
 
             MissingInterval saved = missingIntervalRepository.save(missingInterval);
 
-            auditService.recordAudit("MISSING_DATA", String.valueOf(saved.getId()), "GAP_DETECTED", "EVENT_PIPELINE",
+            auditService.recordAudit("MISSING_DATA", String.valueOf(saved.getId()), "GAP_DETECTED", "System",
                     null, "Missing interval from " + previousEventTime + " to " + currentEventTime + " marked UNKNOWN",
                     "Cadence breach: expected " + cadenceMinutes + "m, actual gap " + gapMinutes + "m. Status: UNKNOWN (never SAFE).");
 

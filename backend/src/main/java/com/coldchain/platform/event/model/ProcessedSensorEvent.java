@@ -2,6 +2,7 @@ package com.coldchain.platform.event.model;
 
 import com.coldchain.platform.sensor.model.Sensor;
 import com.coldchain.platform.shipment.model.Shipment;
+import com.coldchain.platform.lot.model.Lot;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -24,6 +25,10 @@ public class ProcessedSensorEvent {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shipment_id", nullable = false)
     private Shipment shipment;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "lot_id")
+    private Lot lot;
 
     @Column(name = "sequence_no")
     private Long sequenceNo;
@@ -53,6 +58,9 @@ public class ProcessedSensorEvent {
 
     @Column(name = "excursion_incident_id", length = 64)
     private String excursionIncidentId;
+
+    @Column(name = "source", nullable = false, length = 16)
+    private String source = "SENSOR";
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -89,6 +97,9 @@ public class ProcessedSensorEvent {
     public Shipment getShipment() { return shipment; }
     public void setShipment(Shipment shipment) { this.shipment = shipment; }
 
+    public Lot getLot() { return lot; }
+    public void setLot(Lot lot) { this.lot = lot; }
+
     public Long getSequenceNo() { return sequenceNo; }
     public void setSequenceNo(Long sequenceNo) { this.sequenceNo = sequenceNo; }
 
@@ -115,6 +126,9 @@ public class ProcessedSensorEvent {
 
     public String getExcursionIncidentId() { return excursionIncidentId; }
     public void setExcursionIncidentId(String excursionIncidentId) { this.excursionIncidentId = excursionIncidentId; }
+
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source == null || source.isBlank() ? "SENSOR" : source; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

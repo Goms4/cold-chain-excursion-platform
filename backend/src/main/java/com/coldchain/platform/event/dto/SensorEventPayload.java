@@ -3,6 +3,8 @@ package com.coldchain.platform.event.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -20,6 +22,9 @@ public class SensorEventPayload {
     @JsonProperty("shipment_id")
     private String shipmentId;
 
+    @JsonProperty("lot_id")
+    private String lotId;
+
     @JsonProperty("sequence_no")
     private Long sequenceNo;
 
@@ -31,8 +36,13 @@ public class SensorEventPayload {
     private Instant ingestionTime;
 
     @NotNull(message = "temperature_c is required")
+    @DecimalMin(value = "-100.00", message = "temperature_c must be at least -100.00°C")
+    @DecimalMax(value = "100.00", message = "temperature_c must be at most 100.00°C")
     @JsonProperty("temperature_c")
     private BigDecimal temperatureC;
+
+    @JsonProperty("source")
+    private String source = "SENSOR";
 
     public SensorEventPayload() {}
 
@@ -57,6 +67,9 @@ public class SensorEventPayload {
     public String getShipmentId() { return shipmentId; }
     public void setShipmentId(String shipmentId) { this.shipmentId = shipmentId; }
 
+    public String getLotId() { return lotId; }
+    public void setLotId(String lotId) { this.lotId = lotId; }
+
     public Long getSequenceNo() { return sequenceNo; }
     public void setSequenceNo(Long sequenceNo) { this.sequenceNo = sequenceNo; }
 
@@ -68,4 +81,6 @@ public class SensorEventPayload {
 
     public BigDecimal getTemperatureC() { return temperatureC; }
     public void setTemperatureC(BigDecimal temperatureC) { this.temperatureC = temperatureC; }
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
 }

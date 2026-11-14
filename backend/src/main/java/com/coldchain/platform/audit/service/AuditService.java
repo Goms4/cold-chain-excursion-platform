@@ -21,8 +21,12 @@ public class AuditService {
     @Transactional
     public AuditRecord recordAudit(String entityType, String entityId, String action, String actor,
                                    String payloadBefore, String payloadAfter, String rationale) {
-        String resolvedActor = (actor == null || actor.isBlank()) ? "SYSTEM" : actor;
-        AuditRecord record = new AuditRecord(entityType, entityId, action, resolvedActor, payloadBefore, payloadAfter, rationale);
+        String resolvedActor = (actor == null || actor.isBlank() || "EXCURSION_ENGINE".equals(actor)
+                || "EVENT_PIPELINE".equals(actor)) ? "System" : actor;
+        String category = ("DUPLICATE_DETECTED".equals(action) || "QUARANTINED".equals(action)
+                || "INGESTION_REJECTED".equals(action) || "LOGIN_FAILED".equals(action)) ? "TECHNICAL" : "BUSINESS";
+        AuditRecord record = new AuditRecord(entityType, entityId, action, category, resolvedActor,
+                payloadBefore, payloadAfter, rationale);
         return auditRecordRepository.save(record);
     }
 
@@ -34,5 +38,10 @@ public class AuditService {
     @Transactional(readOnly = true)
     public Page<AuditRecord> getAllAudits(Pageable pageable) {
         return auditRecordRepository.findAllByOrderByTimestampDesc(pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AuditRecord> getTechnicalAudits(Pageable pageable) {
+        return auditRecordRepository.findByCategoryOrderByTimestampDesc("TECHNICAL", pageable);
     }
 }

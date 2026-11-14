@@ -4,10 +4,13 @@ import com.coldchain.platform.audit.service.AuditService;
 import com.coldchain.platform.common.exception.ResourceNotFoundException;
 import com.coldchain.platform.common.exception.ValidationException;
 import com.coldchain.platform.event.dto.EventIngestResult;
+import com.coldchain.platform.event.dto.ProcessedSensorEventResponse;
 import com.coldchain.platform.event.dto.SensorEventPayload;
 import com.coldchain.platform.event.model.*;
 import com.coldchain.platform.event.repository.ProcessedSensorEventRepository;
 import com.coldchain.platform.event.repository.RawSensorEventRepository;
+import com.coldchain.platform.event.repository.MissingIntervalRepository;
+import com.coldchain.platform.event.dto.MissingIntervalResponse;
 import com.coldchain.platform.excursion.model.ExcursionIncident;
 import com.coldchain.platform.excursion.model.ExcursionSeverity;
 import com.coldchain.platform.excursion.model.IncidentStatus;
@@ -18,6 +21,8 @@ import com.coldchain.platform.sensor.model.Sensor;
 import com.coldchain.platform.sensor.repository.SensorRepository;
 import com.coldchain.platform.shipment.model.Shipment;
 import com.coldchain.platform.shipment.repository.ShipmentRepository;
+import com.coldchain.platform.lot.model.Lot;
+import com.coldchain.platform.lot.repository.LotRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -45,6 +50,8 @@ public class EventIngestionService {
     private final ExcursionIncidentService excursionIncidentService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final LotRepository lotRepository;
+    private final MissingIntervalRepository missingIntervalRepository;
 
     public EventIngestionService(RawSensorEventRepository rawRepository,
                                  ProcessedSensorEventRepository processedRepository,
@@ -57,7 +64,9 @@ public class EventIngestionService {
                                  ExcursionRuleEngine excursionRuleEngine,
                                  ExcursionIncidentService excursionIncidentService,
                                  AuditService auditService,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 LotRepository lotRepository,
+                                 MissingIntervalRepository missingIntervalRepository) {
         this.rawRepository = rawRepository;
         this.processedRepository = processedRepository;
         this.shipmentRepository = shipmentRepository;
@@ -70,6 +79,8 @@ public class EventIngestionService {
         this.excursionIncidentService = excursionIncidentService;
         this.auditService = auditService;
         this.objectMapper = objectMapper;
+        this.lotRepository = lotRepository;
+        this.missingIntervalRepository = missingIntervalRepository;
     }
 
     @Transactional
@@ -87,9 +98,31 @@ public class EventIngestionService {
         // Validate entity existence
         Shipment shipment = shipmentRepository.findById(payload.getShipmentId())
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment", payload.getShipmentId()));
+        if (shipment.isDeleted() || shipment.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Active Shipment", payload.getShipmentId());
+        }
+        if (shipment.getStatus() == com.coldchain.platform.shipment.model.ShipmentStatus.DELIVERED) {
+            throw new ValidationException("This shipment has been delivered and can no longer accept readings.");
+        }
 
         Sensor sensor = sensorRepository.findById(payload.getSensorId())
                 .orElseThrow(() -> new ResourceNotFoundException("Sensor", payload.getSensorId()));
+        if (sensor.getShipment() == null || !sensor.getShipment().getId().equals(shipment.getId())) {
+            throw new ValidationException("Sensor '" + sensor.getId() + "' is not assigned to shipment '" + shipment.getId() + "'.");
+        }
+
+        Lot lot = null;
+        if (payload.getLotId() != null && !payload.getLotId().isBlank()) {
+            String resolvedLotId = lotRepository.existsById(payload.getLotId()) ? payload.getLotId() : com.coldchain.platform.common.BusinessIds.internalLot(payload.getLotId());
+            lot = lotRepository.findById(resolvedLotId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Lot", payload.getLotId()));
+            if (lot.isDeleted() || lot.getArchivedAt() != null) {
+                throw new ResourceNotFoundException("Active Lot", payload.getLotId());
+            }
+            if (!lot.getShipment().getId().equals(shipment.getId())) {
+                throw new ValidationException("Lot '" + lot.getId() + "' does not belong to shipment '" + shipment.getId() + "'.");
+            }
+        }
 
         if (payload.getTemperatureC() == null) {
             throw new ValidationException("temperature_c is required");
@@ -110,6 +143,8 @@ public class EventIngestionService {
                     payload.getEventTime(), effectiveIngestionTime, payload.getTemperatureC(),
                     TemperatureEvaluationStatus.UNKNOWN, EventQualityFlag.VALID, true, payload.getEventId()
             );
+            processedDuplicate.setLot(lot);
+            processedDuplicate.setSource(normalizeSource(payload.getSource()));
             processedRepository.save(processedDuplicate);
 
             auditService.recordAudit("SENSOR_EVENT", payload.getEventId(), "DUPLICATE_DETECTED", actor,
@@ -128,6 +163,7 @@ public class EventIngestionService {
             result.setEvaluationStatus(TemperatureEvaluationStatus.UNKNOWN);
             result.setIsDuplicate(true);
             result.setMessage("Duplicate event_id detected. Event archived without triggering duplicate incident.");
+            setBusinessView(result, lot, shipment, processedDuplicate);
             return result;
         }
 
@@ -161,6 +197,8 @@ public class EventIngestionService {
                     payload.getEventTime(), effectiveIngestionTime, payload.getTemperatureC(),
                     TemperatureEvaluationStatus.UNKNOWN, qualityFlag, false, null
             );
+            processedEvent.setLot(lot);
+            processedEvent.setSource(normalizeSource(payload.getSource()));
             processedRepository.save(processedEvent);
 
             String quarantineReason = temporalDisposition == EventTimeEvaluationService.EventTemporalDisposition.QUARANTINED_BUSINESS_FINALIZED
@@ -182,6 +220,7 @@ public class EventIngestionService {
             result.setEvaluationStatus(TemperatureEvaluationStatus.UNKNOWN);
             result.setIsDuplicate(false);
             result.setMessage(quarantineReason);
+            setBusinessView(result, lot, shipment, processedEvent);
             return result;
         }
 
@@ -233,7 +272,12 @@ public class EventIngestionService {
                 evalStatus, qualityFlag, false, null
         );
         processedEvent.setExcursionIncidentId(linkedExcursionId);
+        processedEvent.setLot(lot);
+        processedEvent.setSource(normalizeSource(payload.getSource()));
         processedRepository.save(processedEvent);
+        auditService.recordAudit("SENSOR_EVENT", payload.getEventId(), "TEMPERATURE_RECORDED", actor,
+                null, "Temperature reading " + payload.getTemperatureC() + "°C recorded for " + shipment.getId(),
+                "Quality " + qualityFlag.name() + "; event time " + payload.getEventTime());
 
         EventIngestResult result = new EventIngestResult();
         result.setEventId(payload.getEventId());
@@ -248,7 +292,36 @@ public class EventIngestionService {
         result.setIsDuplicate(false);
         result.setExcursionIncidentId(linkedExcursionId);
         result.setMessage("Event successfully processed and evaluated using event_time.");
+        setBusinessView(result, lot, shipment, processedEvent);
         return result;
+    }
+
+    private void setBusinessView(EventIngestResult result, Lot lot, Shipment shipment, ProcessedSensorEvent event) {
+        result.setEventId(com.coldchain.platform.common.BusinessIds.event(event.getId()));
+        result.setShipmentId(com.coldchain.platform.common.BusinessIds.shipment(shipment.getId()));
+        result.setSensorId(com.coldchain.platform.common.BusinessIds.sensor(event.getSensor().getId()));
+        result.setSource(event.getSource());
+        result.setLotId(lot != null ? com.coldchain.platform.common.BusinessIds.lot(lot.getId()) : null);
+        BigDecimal temperature = result.getTemperatureC();
+        if (temperature == null) {
+            result.setCondition("UNKNOWN");
+        } else if (temperature.compareTo(shipment.getStorageProfile().getTargetMinC()) < 0) {
+            result.setCondition("LOW");
+        } else if (temperature.compareTo(shipment.getStorageProfile().getTargetMaxC()) > 0) {
+            result.setCondition("HIGH");
+        } else {
+            result.setCondition("NORMAL");
+        }
+        if (Boolean.TRUE.equals(result.getIsDuplicate())) result.setDataQuality("DUPLICATE");
+        else result.setDataQuality(switch (result.getQualityFlag()) {
+            case VALID -> "VALID";
+            case LATE, OUT_OF_ORDER -> "LATE";
+            case QUARANTINED -> "QUARANTINED";
+        });
+    }
+
+    private String normalizeSource(String source) {
+        return "MANUAL".equalsIgnoreCase(source) ? "MANUAL" : "SENSOR";
     }
 
     @Transactional
@@ -265,12 +338,24 @@ public class EventIngestionService {
     }
 
     @Transactional(readOnly = true)
-    public List<ProcessedSensorEvent> getProcessedEvents(String shipmentId) {
-        return processedRepository.findByShipmentIdOrderByEventTimeAsc(shipmentId);
+    public List<ProcessedSensorEventResponse> getProcessedEvents(String shipmentId) {
+        String resolvedShipmentId = shipmentRepository.existsById(shipmentId) ? shipmentId : com.coldchain.platform.common.BusinessIds.internalShipment(shipmentId);
+        return processedRepository.findByShipmentIdOrderByEventTimeAsc(resolvedShipmentId)
+                .stream()
+                .map(ProcessedSensorEventResponse::fromEntity)
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<RawSensorEvent> getRawEvents(String shipmentId) {
-        return rawRepository.findByShipmentIdOrderByEventTimeAsc(shipmentId);
+        String resolvedShipmentId = shipmentRepository.existsById(shipmentId) ? shipmentId : com.coldchain.platform.common.BusinessIds.internalShipment(shipmentId);
+        return rawRepository.findByShipmentIdOrderByEventTimeAsc(resolvedShipmentId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MissingIntervalResponse> getMissingIntervals(String shipmentId) {
+        String resolvedShipmentId = shipmentRepository.existsById(shipmentId) ? shipmentId : com.coldchain.platform.common.BusinessIds.internalShipment(shipmentId);
+        return missingIntervalRepository.findByShipmentId(resolvedShipmentId).stream()
+                .map(MissingIntervalResponse::from).toList();
     }
 }

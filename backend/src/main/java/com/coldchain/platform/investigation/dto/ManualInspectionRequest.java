@@ -7,7 +7,6 @@ import java.time.Instant;
 
 public class ManualInspectionRequest {
 
-    @NotBlank(message = "inspector_name is required")
     private String inspectorName;
 
     @NotNull(message = "inspection_time is required")

@@ -12,6 +12,7 @@ import com.coldchain.platform.decision.repository.DispositionDecisionRepository;
 import com.coldchain.platform.excursion.model.ExcursionIncident;
 import com.coldchain.platform.excursion.model.IncidentStatus;
 import com.coldchain.platform.excursion.repository.ExcursionIncidentRepository;
+import com.coldchain.platform.excursion.repository.ExcursionAffectedLotRepository;
 import com.coldchain.platform.investigation.model.Investigation;
 import com.coldchain.platform.investigation.model.InvestigationStatus;
 import com.coldchain.platform.investigation.repository.InvestigationRepository;
@@ -19,6 +20,8 @@ import com.coldchain.platform.lot.model.Lot;
 import com.coldchain.platform.lot.model.LotDisposition;
 import com.coldchain.platform.lot.model.LotRiskLevel;
 import com.coldchain.platform.lot.repository.LotRepository;
+import com.coldchain.platform.shipment.model.ShipmentStatus;
+import com.coldchain.platform.shipment.repository.ShipmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,23 +37,28 @@ public class DecisionService {
     private final ExcursionIncidentRepository excursionRepository;
     private final LotRepository lotRepository;
     private final AuditService auditService;
+    private final ShipmentRepository shipmentRepository;
+    private final ExcursionAffectedLotRepository affectedLotRepository;
 
     public DecisionService(DispositionDecisionRepository decisionRepository,
                            InvestigationRepository investigationRepository,
                            ExcursionIncidentRepository excursionRepository,
                            LotRepository lotRepository,
-                           AuditService auditService) {
+                           AuditService auditService,
+                           ShipmentRepository shipmentRepository,
+                           ExcursionAffectedLotRepository affectedLotRepository) {
         this.decisionRepository = decisionRepository;
         this.investigationRepository = investigationRepository;
         this.excursionRepository = excursionRepository;
         this.lotRepository = lotRepository;
         this.auditService = auditService;
+        this.shipmentRepository = shipmentRepository;
+        this.affectedLotRepository = affectedLotRepository;
     }
 
     @Transactional
     public DecisionResponse recordDecision(String investigationId, RecordDecisionRequest request, String actor) {
-        Investigation investigation = investigationRepository.findById(investigationId)
-                .orElseThrow(() -> new ResourceNotFoundException("Investigation", investigationId));
+        Investigation investigation = resolveInvestigation(investigationId);
 
         if (investigation.getStatus() == InvestigationStatus.COMPLETED) {
             throw new InvalidStateTransitionException("Investigation " + investigationId + " is already COMPLETED. Decisions cannot be overwritten.");
@@ -60,21 +68,34 @@ public class DecisionService {
             throw new ValidationException("A detailed disposition reason is mandatory.");
         }
 
-        if (request.getInvestigatorName() == null || request.getInvestigatorName().isBlank()) {
-            throw new ValidationException("investigator_name is required.");
-        }
+        String decidedBy = actor == null || actor.isBlank() ? "Analyst" : actor;
 
         ExcursionIncident excursion = investigation.getExcursion();
-        String lotIdsJoined = String.join(",", request.getAffectedLotIds());
+        List<String> selectedLotIds = request.getAffectedLotIds();
+        if (selectedLotIds == null || selectedLotIds.isEmpty()) {
+            selectedLotIds = affectedLotRepository.findByExcursionId(excursion.getId()).stream()
+                    .map(row -> row.getLot().getId()).toList();
+        }
+        if (selectedLotIds.isEmpty()) throw new ValidationException("No affected lots are linked to this investigation.");
+        List<String> internalLotIds = selectedLotIds.stream().map(id -> {
+            String resolved = lotRepository.existsById(id) ? id : com.coldchain.platform.common.BusinessIds.internalLot(id);
+            Lot lot = lotRepository.findById(resolved)
+                    .orElseThrow(() -> new ResourceNotFoundException("Lot", id));
+            if (!lot.getShipment().getId().equals(excursion.getShipment().getId())) {
+                throw new ValidationException("Lot '" + id + "' is not part of this investigation shipment.");
+            }
+            return resolved;
+        }).toList();
+        String lotIdsJoined = String.join(",", internalLotIds);
 
         // 1. Create append-only disposition decision
         DispositionDecision decision = new DispositionDecision(
                 investigation,
                 excursion,
                 request.getDecision(),
-                request.getInvestigatorName(),
+                decidedBy,
                 request.getReason(),
-                request.getRuleVersion(),
+                excursion.getRuleVersion(),
                 lotIdsJoined,
                 Instant.now()
         );
@@ -95,7 +116,7 @@ public class DecisionService {
             targetRisk = LotRiskLevel.CRITICAL;
         }
 
-        for (String lotId : request.getAffectedLotIds()) {
+        for (String lotId : internalLotIds) {
             lotRepository.findById(lotId).ifPresent(lot -> {
                 lot.setDispositionStatus(targetDisposition);
                 lot.setRiskLevel(targetRisk);
@@ -103,7 +124,7 @@ public class DecisionService {
 
                 auditService.recordAudit("LOT", lot.getId(), "DISPOSITION_DECIDED", actor,
                         null, "disposition: " + targetDisposition.name(),
-                        "Decision " + request.getDecision().name() + " recorded by " + request.getInvestigatorName());
+                        "Decision " + request.getDecision().name() + " recorded by " + decidedBy);
             });
         }
 
@@ -114,6 +135,13 @@ public class DecisionService {
 
         excursion.setStatus(IncidentStatus.DISPOSITIONED);
         excursionRepository.save(excursion);
+        var shipment = excursion.getShipment();
+        shipment.setStatus(switch (request.getDecision()) {
+            case RELEASE -> ShipmentStatus.RELEASED;
+            case HOLD -> ShipmentStatus.ON_HOLD;
+            case REJECT -> ShipmentStatus.REJECTED;
+        });
+        shipmentRepository.save(shipment);
 
         // 4. Append audit record
         auditService.recordAudit("DECISION", String.valueOf(saved.getId()), "RECORDED", actor,
@@ -125,8 +153,15 @@ public class DecisionService {
 
     @Transactional(readOnly = true)
     public List<DecisionResponse> getDecisionsForInvestigation(String investigationId) {
-        return decisionRepository.findByInvestigationId(investigationId).stream()
+        Investigation investigation = resolveInvestigation(investigationId);
+        return decisionRepository.findByInvestigationId(investigation.getId()).stream()
                 .map(DecisionResponse::fromEntity)
                 .collect(Collectors.toList());
+    }
+
+    private Investigation resolveInvestigation(String id) {
+        return investigationRepository.findById(id).orElseGet(() -> investigationRepository.findAll().stream()
+                .filter(inv -> com.coldchain.platform.common.BusinessIds.investigation(inv.getId()).equals(id))
+                .findFirst().orElseThrow(() -> new ResourceNotFoundException("Investigation", id)));
     }
 }

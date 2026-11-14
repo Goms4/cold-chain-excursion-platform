@@ -12,4 +12,9 @@ import java.util.Optional;
 public interface ShipmentRepository extends JpaRepository<Shipment, String> {
     Optional<Shipment> findByTrackingNumber(String trackingNumber);
     List<Shipment> findByStatus(ShipmentStatus status);
+    List<Shipment> findByArchivedAtIsNull();
+    List<Shipment> findByArchivedAtIsNotNull();
+    List<Shipment> findByArchivedAtIsNullAndDeletedAtIsNull();
+    List<Shipment> findByArchivedAtIsNotNullAndDeletedAtIsNull();
+    boolean existsByTrackingNumber(String trackingNumber);
 }

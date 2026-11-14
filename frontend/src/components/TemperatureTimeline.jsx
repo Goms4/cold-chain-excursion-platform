@@ -1,164 +1,91 @@
 import React from 'react';
 
 export default function TemperatureTimeline({ events = [], missingIntervals = [], profile }) {
-  if (!events || events.length === 0) {
-    return (
-      <div className="p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-lg">
-        No temperature telemetry recorded yet for this shipment.
-      </div>
-    );
+  const chartEvents = [...(events || [])]
+    .filter(event => event.dataQuality !== 'DUPLICATE' && Number.isFinite(Number(event.temperatureC)) && event.eventTime)
+    .sort((a, b) => new Date(a.eventTime) - new Date(b.eventTime));
+  if (chartEvents.length === 0 && missingIntervals.length === 0) {
+    return <div className="empty-inline">No temperature readings have been recorded for this shipment.</div>;
   }
 
-  // Target bounds from storage profile
-  const targetMin = profile?.targetMinC != null ? Number(profile.targetMinC) : 15.0;
-  const targetMax = profile?.targetMaxC != null ? Number(profile.targetMaxC) : 25.0;
-  const minorMax = profile?.minorMaxC != null ? Number(profile.minorMaxC) : 30.0;
-  const criticalMax = profile?.criticalMaxC != null ? Number(profile.criticalMaxC) : 40.0;
+  const targetMin = Number(profile?.targetMinC);
+  const targetMax = Number(profile?.targetMaxC);
+  const minorMax = Number(profile?.minorMaxC);
+  const criticalMax = Number(profile?.criticalMaxC);
+  if (![targetMin, targetMax, minorMax, criticalMax].every(Number.isFinite)) {
+    return <div className="alert-card error">The shipment storage range is unavailable, so the temperature chart cannot be drawn.</div>;
+  }
 
-  // Find min and max for chart scale
-  const temps = events.map(e => Number(e.temperatureC || 20));
+  const timestamps = [
+    ...chartEvents.map(event => new Date(event.eventTime).getTime()),
+    ...missingIntervals.flatMap(interval => [new Date(interval.gapStartTime).getTime(), new Date(interval.gapEndTime).getTime()]),
+  ].filter(Number.isFinite);
+  const timeStart = Math.min(...timestamps);
+  const timeEnd = Math.max(...timestamps);
+  const timeRange = timeEnd - timeStart || 1;
+  const temps = chartEvents.map(event => Number(event.temperatureC));
   const minTemp = Math.min(targetMin - 5, ...temps);
   const maxTemp = Math.max(criticalMax + 5, ...temps);
   const tempRange = maxTemp - minTemp || 1;
-
-  const height = 220;
   const width = 760;
+  const height = 220;
   const padding = { top: 25, right: 35, bottom: 35, left: 45 };
-
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
-
-  const getY = (temp) => {
-    return padding.top + innerHeight - ((temp - minTemp) / tempRange) * innerHeight;
-  };
-
-  const getX = (index) => {
-    if (events.length === 1) return padding.left + innerWidth / 2;
-    return padding.left + (index / (events.length - 1)) * innerWidth;
-  };
-
-  // Safe target zone rectangle coordinates
+  const getX = time => timeEnd === timeStart ? padding.left + innerWidth / 2 : padding.left + ((time - timeStart) / timeRange) * innerWidth;
+  const getY = temperature => padding.top + innerHeight - ((temperature - minTemp) / tempRange) * innerHeight;
   const targetYTop = getY(targetMax);
   const targetYBottom = getY(targetMin);
-  const targetHeight = Math.max(0, targetYBottom - targetYTop);
+  const lines = chartEvents.slice(1).flatMap((event, index) => {
+    const prior = chartEvents[index];
+    const priorTime = new Date(prior.eventTime).getTime();
+    const currentTime = new Date(event.eventTime).getTime();
+    const crossesGap = missingIntervals.some(interval => new Date(interval.gapStartTime).getTime() < currentTime && new Date(interval.gapEndTime).getTime() > priorTime);
+    if (crossesGap) return [];
+    const outside = [Number(prior.temperatureC), Number(event.temperatureC)].some(value => value < targetMin || value > targetMax);
+    return [{ points: `${getX(priorTime)},${getY(Number(prior.temperatureC))} ${getX(currentTime)},${getY(Number(event.temperatureC))}`, outside, duration: Math.max(0, Math.round((currentTime - priorTime) / 60000)), x: (getX(priorTime) + getX(currentTime)) / 2, y: (getY(Number(prior.temperatureC)) + getY(Number(event.temperatureC))) / 2 }];
+  });
 
-  // Line path
-  const linePoints = events.map((e, idx) => `${getX(idx)},${getY(Number(e.temperatureC || 20))}`).join(' ');
-
-  return (
-    <div className="w-full bg-white p-4 border border-clinical-border rounded-lg clinical-card">
-      <div className="flex items-center justify-between mb-3 text-xs">
-        <div className="flex items-center space-x-3">
-          <span className="font-semibold text-slate-800">Event-Time Temperature Chronology</span>
-          <span className="font-mono text-slate-500">[{events.length} telemetry readings]</span>
-        </div>
-        <div className="flex items-center space-x-4 text-[11px] text-slate-600">
-          <span className="flex items-center space-x-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 border border-emerald-400"></span>
-            <span>Target ({targetMin}°C - {targetMax}°C)</span>
-          </span>
-          <span className="flex items-center space-x-1">
-            <span className="w-2.5 h-1 border-t-2 border-dashed border-amber-500"></span>
-            <span>Minor Limit ({minorMax}°C)</span>
-          </span>
-          <span className="flex items-center space-x-1">
-            <span className="w-2.5 h-1 border-t-2 border-dashed border-rose-500"></span>
-            <span>Critical Limit ({criticalMax}°C)</span>
-          </span>
-          {missingIntervals && missingIntervals.length > 0 && (
-            <span className="flex items-center space-x-1">
-              <span className="w-2.5 h-2.5 rounded-sm bg-purple-100 border border-purple-400"></span>
-              <span className="font-mono text-purple-700">Missing (UNKNOWN)</span>
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto max-h-64">
-          {/* Target Compliant Range Band */}
-          <rect
-            x={padding.left}
-            y={targetYTop}
-            width={innerWidth}
-            height={targetHeight}
-            fill="#ECFDF5"
-            stroke="#A7F3D0"
-            strokeWidth="0.5"
-            opacity="0.8"
-          />
-
-          {/* Grid lines and Y labels */}
-          {[minTemp, targetMin, targetMax, minorMax, criticalMax].map((t, idx) => {
-            const y = getY(t);
-            return (
-              <g key={idx}>
-                <line
-                  x1={padding.left}
-                  y1={y}
-                  x2={padding.left + innerWidth}
-                  y2={y}
-                  stroke={t === criticalMax ? '#FDA4AF' : t === minorMax ? '#FDE68A' : '#F1F5F9'}
-                  strokeDasharray={t > targetMax ? '4,4' : 'none'}
-                  strokeWidth="1"
-                />
-                <text
-                  x={padding.left - 8}
-                  y={y + 3}
-                  textAnchor="end"
-                  className="text-[10px] fill-slate-400 font-mono"
-                >
-                  {t.toFixed(0)}°C
-                </text>
-              </g>
-            );
-          })}
-
-          {/* Data Line */}
-          {events.length > 1 && (
-            <polyline
-              fill="none"
-              stroke="#0F4C5C"
-              strokeWidth="2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              points={linePoints}
-            />
-          )}
-
-          {/* Points */}
-          {events.map((e, idx) => {
-            const x = getX(idx);
-            const temp = Number(e.temperatureC || 20);
-            const y = getY(temp);
-            const isExcursion = temp < targetMin || temp > targetMax;
-            const isCritical = temp >= criticalMax;
-            const fill = isCritical ? '#E11D48' : isExcursion ? '#D97706' : '#059669';
-
-            return (
-              <g key={e.id || idx} className="cursor-pointer group">
-                <circle
-                  cx={x}
-                  cy={y}
-                  r="4"
-                  fill={fill}
-                  stroke="#FFFFFF"
-                  strokeWidth="1.5"
-                />
-                <title>{`Event: ${e.eventId}\nTime: ${e.eventTime}\nTemp: ${temp}°C\nStatus: ${e.status || 'NORMAL'}`}</title>
-              </g>
-            );
-          })}
-
-          {/* X axis labels (Start, Mid, End) */}
-          <text x={padding.left} y={height - 10} className="text-[10px] fill-slate-400 font-mono">
-            {events[0]?.eventTime ? new Date(events[0].eventTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-          </text>
-          <text x={padding.left + innerWidth} y={height - 10} textAnchor="end" className="text-[10px] fill-slate-400 font-mono">
-            {events[events.length - 1]?.eventTime ? new Date(events[events.length - 1].eventTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-          </text>
-        </svg>
-      </div>
+  return <div className="temperature-timeline">
+    <div className="timeline-heading"><strong>Temperature timeline</strong><span>{chartEvents.length} readings</span></div>
+    <div className="timeline-legend">
+      <span>Target range: {targetMin}°C–{targetMax}°C</span><span>Minor limit: {minorMax}°C</span>
+      <span>Critical limit: {criticalMax}°C</span>{missingIntervals.length > 0 && <span>Dashed box: no readings</span>}
     </div>
-  );
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto max-h-64" role="img" aria-label="Temperature readings over time">
+        <rect x={padding.left} y={targetYTop} width={innerWidth} height={Math.max(0, targetYBottom - targetYTop)} fill="#FFFFFF" />
+        {missingIntervals.map((interval, index) => {
+          const start = Math.max(timeStart, new Date(interval.gapStartTime).getTime());
+          const end = Math.min(timeEnd, new Date(interval.gapEndTime).getTime());
+          if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+          return <g key={interval.intervalId || index}>
+            <rect x={getX(start)} y={padding.top} width={Math.max(1, getX(end) - getX(start))} height={innerHeight} fill="#FFFFFF" stroke="var(--sev-critical)" strokeDasharray="4,3" />
+            <text x={(getX(start) + getX(end)) / 2} y={padding.top + 13} textAnchor="middle" fill="var(--sev-critical)" style={{ fontSize: 9 }}>No readings</text>
+            <title>{`Unknown temperature interval: ${interval.gapStartTime} to ${interval.gapEndTime}`}</title>
+          </g>;
+        })}
+        {[targetMin, targetMax, minorMax, criticalMax].map((value, index) => <g key={index}>
+          <line x1={padding.left} y1={getY(value)} x2={padding.left + innerWidth} y2={getY(value)} stroke={value >= criticalMax ? 'var(--sev-critical)' : value >= minorMax ? 'var(--sev-major)' : 'var(--border)'} strokeDasharray={index > 1 ? '4,4' : undefined} />
+          <text x={padding.left - 8} y={getY(value) + 3} textAnchor="end" className="mono" style={{ fontSize: 10, fill: 'var(--text-muted)' }}>{value}°C</text>
+        </g>)}
+        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + innerHeight} stroke="var(--border)" />
+        <line x1={padding.left + innerWidth} y1={padding.top} x2={padding.left + innerWidth} y2={padding.top + innerHeight} stroke="var(--border)" />
+        {lines.map((line, index) => <g key={index}><polyline fill="none" stroke={line.outside ? 'var(--sev-critical)' : 'var(--text-muted)'} strokeWidth="1.2" points={line.points} />{line.outside && <text x={line.x} y={line.y - 8} textAnchor="middle" fill="var(--sev-critical)" style={{ fontSize: 9 }}>{line.duration} min</text>}</g>)}
+        {chartEvents.map((event, index) => {
+          const value = Number(event.temperatureC);
+          const x = getX(new Date(event.eventTime).getTime());
+          const y = getY(value);
+          const outside = value < targetMin || value > targetMax;
+          return <g key={event.eventId || index}>
+            <rect x={x - 3} y={y - 3} width="6" height="6" fill={outside ? 'var(--sev-critical)' : 'var(--text)'} />
+            <text x={x} y={y - 7} textAnchor="middle" fill={outside ? 'var(--sev-critical)' : 'var(--text-muted)'} style={{ fontSize: 9 }}>{value}°</text>
+            <title>{`Reading: ${value}°C\nCondition: ${event.condition || 'UNKNOWN'}\nSource: ${event.source || 'SENSOR'}\nTime: ${event.eventTime}`}</title>
+          </g>;
+        })}
+        <text x={padding.left} y={height - 10} className="mono" style={{ fontSize: 10, fill: 'var(--text-muted)' }}>{new Date(timeStart).toLocaleString()}</text>
+        <text x={padding.left + innerWidth} y={height - 10} textAnchor="end" className="mono" style={{ fontSize: 10, fill: 'var(--text-muted)' }}>{new Date(timeEnd).toLocaleString()}</text>
+      </svg>
+    </div>
+  </div>;
 }

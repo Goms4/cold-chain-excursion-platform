@@ -15,6 +15,9 @@ public class Shipment {
     @Column(name = "tracking_number", nullable = false, unique = true, length = 128)
     private String trackingNumber;
 
+    @Column(name = "shipment_reference", nullable = false, length = 128)
+    private String shipmentReference;
+
     @Column(name = "origin", nullable = false, length = 128)
     private String origin;
 
@@ -41,6 +44,21 @@ public class Shipment {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    @Column(name = "expected_delivery_at")
+    private Instant expectedDeliveryAt;
+
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "deleted_by", length = 128)
+    private String deletedBy;
+
+    @Column(name = "delete_reason", columnDefinition = "TEXT")
+    private String deleteReason;
+
     public Shipment() {}
 
     public Shipment(String id, String trackingNumber, String origin, String destination,
@@ -48,6 +66,7 @@ public class Shipment {
                     Integer expectedCadenceMinutes, Integer allowedLatenessMinutes) {
         this.id = id;
         this.trackingNumber = trackingNumber;
+        this.shipmentReference = id;
         this.origin = origin;
         this.destination = destination;
         this.storageProfile = storageProfile;
@@ -59,7 +78,7 @@ public class Shipment {
     }
 
     public boolean isBusinessFinalized() {
-        return this.status == ShipmentStatus.DELIVERED || this.status == ShipmentStatus.CLOSED;
+        return this.status == ShipmentStatus.DELIVERED || this.status == ShipmentStatus.REJECTED || this.status == ShipmentStatus.CLOSED;
     }
 
     public String getId() { return id; }
@@ -67,6 +86,8 @@ public class Shipment {
 
     public String getTrackingNumber() { return trackingNumber; }
     public void setTrackingNumber(String trackingNumber) { this.trackingNumber = trackingNumber; }
+    public String getShipmentReference() { return shipmentReference; }
+    public void setShipmentReference(String shipmentReference) { this.shipmentReference = shipmentReference; }
 
     public String getOrigin() { return origin; }
     public void setOrigin(String origin) { this.origin = origin; }
@@ -94,4 +115,17 @@ public class Shipment {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public Instant getExpectedDeliveryAt() { return expectedDeliveryAt; }
+    public void setExpectedDeliveryAt(Instant expectedDeliveryAt) { this.expectedDeliveryAt = expectedDeliveryAt; }
+
+    public Instant getArchivedAt() { return archivedAt; }
+    public void setArchivedAt(Instant archivedAt) { this.archivedAt = archivedAt; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+    public String getDeletedBy() { return deletedBy; }
+    public void setDeletedBy(String deletedBy) { this.deletedBy = deletedBy; }
+    public String getDeleteReason() { return deleteReason; }
+    public void setDeleteReason(String deleteReason) { this.deleteReason = deleteReason; }
+    public boolean isDeleted() { return deletedAt != null; }
 }

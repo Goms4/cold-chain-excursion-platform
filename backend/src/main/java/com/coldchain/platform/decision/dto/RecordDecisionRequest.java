@@ -9,19 +9,16 @@ import java.util.List;
 
 public class RecordDecisionRequest {
 
-    @NotNull(message = "decision is required (RELEASE, HOLD, REJECT)")
+    @NotNull(message = "Choose RELEASE, HOLD, or REJECT.")
     private DecisionType decision;
 
-    @NotBlank(message = "investigator_name is required")
     private String investigatorName;
 
-    @NotBlank(message = "reason is required")
+    @NotBlank(message = "Please provide a reason for this decision.")
     private String reason;
 
-    @NotBlank(message = "rule_version is required")
     private String ruleVersion;
 
-    @NotEmpty(message = "affected_lot_ids list cannot be empty")
     private List<String> affectedLotIds;
 
     public RecordDecisionRequest() {}

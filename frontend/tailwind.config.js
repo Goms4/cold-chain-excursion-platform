@@ -7,22 +7,25 @@ export default {
   theme: {
     extend: {
       colors: {
-        pharma: {
-          50: '#F0FDF4',
-          100: '#DCFCE7',
-          600: '#15803D',
-          700: '#0F4C5C', // Deep pharmaceutical teal/green accent
-          800: '#0E3B43',
-          900: '#09252B',
-        },
-        clinical: {
-          bg: '#F8FAFC',
-          card: '#FFFFFF',
-          border: '#E2E8F0',
-          text: '#0F172A',
-          muted: '#64748B'
-        }
-      }
+        accent:  'var(--accent)',
+        'accent-hover': 'var(--accent-hover)',
+        'accent-tint':  'var(--accent-tint)',
+        border:  'var(--border)',
+        surface: 'var(--bg-surface)',
+        page:    'var(--bg-page)',
+        text:    'var(--text)',
+        muted:   'var(--text-muted)',
+        critical: 'var(--sev-critical)',
+        major:   'var(--sev-major)',
+        minor:   'var(--sev-minor)',
+      },
+      fontFamily: {
+        sans: ['IBM Plex Mono', 'ui-monospace', 'monospace'],
+        mono: ['IBM Plex Mono', 'ui-monospace', 'monospace'],
+      },
+      borderRadius: {
+        DEFAULT: '1px',
+      },
     },
   },
   plugins: [],

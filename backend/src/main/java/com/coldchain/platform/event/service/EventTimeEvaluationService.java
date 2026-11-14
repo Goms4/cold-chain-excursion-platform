@@ -15,6 +15,7 @@ public class EventTimeEvaluationService {
         ACCEPTED_LATE,
         ACCEPTED_OUT_OF_ORDER,
         QUARANTINED_WATERMARK_BREACH,
+        QUARANTINED_FUTURE_EVENT,
         QUARANTINED_BUSINESS_FINALIZED
     }
 
@@ -30,6 +31,10 @@ public class EventTimeEvaluationService {
         // 1. Check explicit business finalization states (shipment CLOSED/DELIVERED, or incident DISPOSITIONED/CLOSED)
         if (shipment.isBusinessFinalized() || isIncidentFinalized) {
             return EventTemporalDisposition.QUARANTINED_BUSINESS_FINALIZED;
+        }
+
+        if (eventTime.isAfter(ingestionTime.plusSeconds(120))) {
+            return EventTemporalDisposition.QUARANTINED_FUTURE_EVENT;
         }
 
         // 2. Check allowed-lateness watermark
@@ -59,7 +64,8 @@ public class EventTimeEvaluationService {
             case ACCEPTED_VALID -> EventQualityFlag.VALID;
             case ACCEPTED_LATE -> EventQualityFlag.LATE;
             case ACCEPTED_OUT_OF_ORDER -> EventQualityFlag.OUT_OF_ORDER;
-            case QUARANTINED_WATERMARK_BREACH, QUARANTINED_BUSINESS_FINALIZED -> EventQualityFlag.QUARANTINED;
+            case QUARANTINED_WATERMARK_BREACH, QUARANTINED_FUTURE_EVENT,
+                    QUARANTINED_BUSINESS_FINALIZED -> EventQualityFlag.QUARANTINED;
         };
     }
 }

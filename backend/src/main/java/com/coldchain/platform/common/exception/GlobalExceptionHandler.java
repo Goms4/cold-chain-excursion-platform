@@ -51,7 +51,7 @@ public class GlobalExceptionHandler {
                 Instant.now(),
                 HttpStatus.BAD_REQUEST.value(),
                 "VALIDATION_ERROR",
-                "Malformed JSON request: " + ex.getMessage(),
+                "Enter a valid temperature and event time.",
                 request.getRequestURI()
         );
         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);

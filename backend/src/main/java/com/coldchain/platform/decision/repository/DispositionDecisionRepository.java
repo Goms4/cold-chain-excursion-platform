@@ -10,4 +10,5 @@ import java.util.List;
 public interface DispositionDecisionRepository extends JpaRepository<DispositionDecision, Long> {
     List<DispositionDecision> findByInvestigationId(String investigationId);
     List<DispositionDecision> findByExcursionId(String excursionId);
+    boolean existsByExcursion_Shipment_Id(String shipmentId);
 }

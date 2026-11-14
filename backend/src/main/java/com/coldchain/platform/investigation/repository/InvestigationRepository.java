@@ -12,5 +12,6 @@ import java.util.Optional;
 public interface InvestigationRepository extends JpaRepository<Investigation, String> {
     Optional<Investigation> findByExcursionId(String excursionId);
     List<Investigation> findByStatus(InvestigationStatus status);
+    List<Investigation> findByExcursion_Shipment_Id(String shipmentId);
     long countByStatus(InvestigationStatus status);
 }

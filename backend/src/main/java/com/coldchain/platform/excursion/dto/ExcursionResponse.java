@@ -3,6 +3,7 @@ package com.coldchain.platform.excursion.dto;
 import com.coldchain.platform.excursion.model.ExcursionIncident;
 import com.coldchain.platform.excursion.model.ExcursionSeverity;
 import com.coldchain.platform.excursion.model.IncidentStatus;
+import com.coldchain.platform.common.BusinessIds;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -18,16 +19,18 @@ public class ExcursionResponse {
     private Instant endEventTime;
     private BigDecimal peakTemperatureC;
     private Integer durationMinutes;
+    private Long readingCount;
+    private String summary;
     private List<String> affectedLotIds;
     private Instant createdAt;
     private Instant updatedAt;
 
     public ExcursionResponse() {}
 
-    public static ExcursionResponse fromEntity(ExcursionIncident incident, List<String> affectedLotIds) {
+    public static ExcursionResponse fromEntity(ExcursionIncident incident, List<String> affectedLotIds, long readingCount) {
         ExcursionResponse dto = new ExcursionResponse();
         dto.setId(incident.getId());
-        dto.setShipmentId(incident.getShipment().getId());
+        dto.setShipmentId(BusinessIds.shipment(incident.getShipment().getId()));
         dto.setRuleVersion(incident.getRuleVersion());
         dto.setSeverity(incident.getSeverity());
         dto.setStatus(incident.getStatus());
@@ -35,7 +38,12 @@ public class ExcursionResponse {
         dto.setEndEventTime(incident.getEndEventTime());
         dto.setPeakTemperatureC(incident.getPeakTemperatureC());
         dto.setDurationMinutes(incident.getDurationMinutes());
-        dto.setAffectedLotIds(affectedLotIds);
+        dto.setReadingCount(readingCount);
+        dto.setSummary(readingCount == 1
+                ? String.format(java.util.Locale.ROOT, "One reading reached %.1f°C outside the storage target.", incident.getPeakTemperatureC())
+                : String.format(java.util.Locale.ROOT, "%d readings reached %.1f°C outside the storage target over %d minutes.",
+                readingCount, incident.getPeakTemperatureC(), incident.getDurationMinutes() == null ? 0 : incident.getDurationMinutes()));
+        dto.setAffectedLotIds(affectedLotIds.stream().map(BusinessIds::lot).toList());
         dto.setCreatedAt(incident.getCreatedAt());
         dto.setUpdatedAt(incident.getUpdatedAt());
         return dto;
@@ -67,6 +75,10 @@ public class ExcursionResponse {
 
     public Integer getDurationMinutes() { return durationMinutes; }
     public void setDurationMinutes(Integer durationMinutes) { this.durationMinutes = durationMinutes; }
+    public Long getReadingCount() { return readingCount; }
+    public void setReadingCount(Long readingCount) { this.readingCount = readingCount; }
+    public String getSummary() { return summary; }
+    public void setSummary(String summary) { this.summary = summary; }
 
     public List<String> getAffectedLotIds() { return affectedLotIds; }
     public void setAffectedLotIds(List<String> affectedLotIds) { this.affectedLotIds = affectedLotIds; }

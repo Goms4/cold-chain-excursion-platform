@@ -2,6 +2,8 @@ package com.coldchain.platform.investigation.web;
 
 import com.coldchain.platform.investigation.dto.InvestigationResponse;
 import com.coldchain.platform.investigation.dto.ManualInspectionRequest;
+import com.coldchain.platform.investigation.dto.RegisterInvestigationRequest;
+import com.coldchain.platform.investigation.dto.AssignInvestigatorRequest;
 import com.coldchain.platform.investigation.model.ManualInspectionRecord;
 import com.coldchain.platform.investigation.service.InvestigationService;
 import jakarta.validation.Valid;
@@ -20,6 +22,14 @@ public class InvestigationController {
         this.investigationService = investigationService;
     }
 
+    @PostMapping
+    public ResponseEntity<InvestigationResponse> registerInvestigation(@Valid @RequestBody RegisterInvestigationRequest request,
+                                                                       Authentication authentication) {
+        String actor = authentication != null ? authentication.getName() : "OPERATIONS";
+        return new ResponseEntity<>(investigationService.registerForExcursion(request.getShipmentId(), request.getLotId(),
+                request.getExcursionId(), request.getInvestigator(), actor), HttpStatus.CREATED);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<InvestigationResponse> getInvestigationById(@PathVariable String id) {
         return ResponseEntity.ok(investigationService.getInvestigationById(id));
@@ -35,7 +45,16 @@ public class InvestigationController {
                                                                       @Valid @RequestBody ManualInspectionRequest request,
                                                                       Authentication authentication) {
         String actor = authentication != null ? authentication.getName() : request.getInspectorName();
+        if (authentication != null) request.setInspectorName(authentication.getName());
         ManualInspectionRecord record = investigationService.addManualInspection(id, request, actor);
         return new ResponseEntity<>(record, HttpStatus.CREATED);
+    }
+
+    @PatchMapping("/{id}/assignee")
+    public ResponseEntity<InvestigationResponse> assignInvestigator(@PathVariable String id,
+                                                                    @Valid @RequestBody AssignInvestigatorRequest request,
+                                                                    Authentication authentication) {
+        String actor = authentication == null ? "OPERATIONS" : authentication.getName();
+        return ResponseEntity.ok(investigationService.assignInvestigator(id, request.getInvestigator(), actor));
     }
 }

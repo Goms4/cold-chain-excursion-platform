@@ -1,199 +1,111 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Truck, Plus, ArrowRight, Shield } from 'lucide-react';
-import { apiRequest } from '../api/client';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ArrowRight, Package, Plus, Search } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { apiRequest, getActiveRole } from '../api/client';
 import StatusBadge from '../components/StatusBadge';
+import Modal from '../components/Modal';
+import { Archive, Trash2 } from 'lucide-react';
+
+const readable = value => String(value || 'Unknown').replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase());
 
 export default function Shipments() {
+  const [searchParams] = useSearchParams();
+  const attentionOnly = searchParams.get('filter') === 'attention';
+  const role = getActiveRole();
   const [shipments, setShipments] = useState([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [formData, setFormData] = useState({
-    id: `SHP-${Math.floor(100 + Math.random() * 900)}`,
-    trackingNumber: `TRK-${Math.floor(100000 + Math.random() * 900000)}`,
-    origin: 'Copenhagen Bio-Logistics Hub',
-    destination: 'Stockholm University Hospital',
-    storageProfileId: 'PROFILE-REF',
-    expectedCadenceMinutes: 5,
-    allowedLatenessMinutes: 120
-  });
+  const [query, setQuery] = useState('');
+  const [visibility, setVisibility] = useState('ACTIVE');
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const emptyForm = () => ({ shipmentReference: '', trackingNumber: '', origin: '', destination: '', storageProfileId: 'PROFILE-REF', status: 'PLANNED', expectedDeliveryAt: '' });
+  const [form, setForm] = useState(emptyForm);
 
-  const loadShipments = async () => {
+  const load = useCallback(async () => {
+    setError('');
+    try { setShipments(await apiRequest(`/api/shipments${visibility === 'ARCHIVED' ? '?includeArchived=true' : ''}`) || []); }
+    catch (e) { setError(e.message || 'Could not load shipments.'); }
+    finally { setLoading(false); }
+  }, [visibility]);
+  useEffect(() => { load(); window.addEventListener('cold_chain_refresh', load); return () => window.removeEventListener('cold_chain_refresh', load); }, [load]);
+
+  const filtered = shipments.filter(s => (!attentionOnly || ['TEMPERATURE_ISSUE', 'AT_RISK'].includes(s.condition))
+    && [s.shipmentId, s.id, s.trackingNumber, s.origin, s.destination].some(v => String(v || '').toLowerCase().includes(query.toLowerCase())));
+  const submit = async e => {
+    e.preventDefault(); setSaving(true); setError('');
     try {
-      const data = await apiRequest('/api/shipments');
-      setShipments(data);
-    } catch (e) {
-      console.error(e);
-    }
+      await apiRequest('/api/shipments', { method: 'POST', body: JSON.stringify({ ...form, expectedDeliveryAt: form.expectedDeliveryAt ? new Date(form.expectedDeliveryAt).toISOString() : null, expectedCadenceMinutes: 5, allowedLatenessMinutes: 120 }) });
+      setShowForm(false); setMessage('Shipment added.'); setForm(emptyForm()); await load();
+      setTimeout(() => setMessage(''), 3000);
+    } catch (e2) { setError(e2.message || 'Unable to register this shipment.'); }
+    finally { setSaving(false); }
   };
-
-  useEffect(() => {
-    loadShipments();
-    const listener = () => loadShipments();
-    window.addEventListener('cold_chain_refresh', listener);
-    return () => window.removeEventListener('cold_chain_refresh', listener);
-  }, []);
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
+  const removeOrArchive = async shipment => {
+    const archive = shipment.hasOperationalHistory;
+    const reason = archive ? '' : window.prompt(`Why should ${shipment.shipmentId} be removed from active operations?`);
+    if (!archive && (!reason || !reason.trim())) return;
+    const message = archive
+      ? `${shipment.shipmentId} has operational history. Archive it while retaining its records?`
+      : `Remove ${shipment.shipmentId} from active operations? Its record and audit history will be retained.`;
+    if (!window.confirm(message)) return;
     try {
-      await apiRequest('/api/shipments', {
-        method: 'POST',
-        body: JSON.stringify(formData)
-      });
-      setShowCreate(false);
-      loadShipments();
-    } catch (err) {
-      alert(err.message);
-    }
+      if (archive) await apiRequest(`/api/shipments/${shipment.id}/archive`, { method: 'POST' });
+      else await apiRequest(`/api/shipments/${shipment.id}`, { method: 'DELETE', body: JSON.stringify({ reason: reason.trim() }) });
+      setMessage(archive ? 'Shipment archived.' : 'Shipment removed from active operations.');
+      await load();
+    } catch (e) { setError(e.message || 'Unable to update shipment lifecycle.'); }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Cold-Chain Shipments</h2>
-          <p className="text-xs text-clinical-muted">Temperature-controlled distribution consignments and active monitored lanes</p>
+    <div className="page-stack">
+      <div className="page-heading-row">
+        <div><span className="eyebrow">COLD CHAIN</span><h1>Shipments</h1><p>Track route, condition and lot readiness in one place.</p></div>
+        {role === 'OPERATIONS' && <button className="btn-primary" onClick={() => { setForm(emptyForm()); setShowForm(true); }}><Plus size={16} /> Register shipment</button>}
+      </div>
+      {message && <div className="success-message">{message}</div>}
+      {error && <div className="alert-card error">{error}</div>}
+      <section className="content-card">
+        <div className="list-toolbar">
+          <div className="list-count"><strong>{attentionOnly ? filtered.length : shipments.length}</strong> {attentionOnly ? 'shipments need attention' : shipments.length === 1 ? 'shipment' : 'shipments'}</div>
+          <div className="list-toolbar-controls"><select className="form-select" value={visibility} onChange={e => setVisibility(e.target.value)} aria-label="Shipment visibility"><option value="ACTIVE">Active shipments</option><option value="ARCHIVED">Archived shipments</option></select><label className="search-box"><Search size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search shipments" aria-label="Search shipments" /></label></div>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-pharma-700 hover:bg-pharma-800 text-white rounded text-xs font-semibold shadow-sm transition"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Register Shipment</span>
-        </button>
-      </div>
+        {loading ? <div className="loading-card">Loading shipments…</div> : filtered.length === 0 ? (
+            <div className="empty-state"><span className="empty-icon"><Package size={20} /></span><strong>{query ? 'No matching shipments' : attentionOnly ? 'No shipments need attention' : visibility === 'ARCHIVED' ? 'No archived shipments' : 'No shipments registered'}</strong><span>{query ? 'Try another shipment, tracking number or location.' : attentionOnly ? 'Shipments with a temperature issue or at-risk condition will appear here.' : visibility === 'ARCHIVED' ? 'Archived shipments remain available for traceability.' : 'New shipments will appear here after registration.'}</span></div>
+        ) : (
+          <div className="table-scroll"><table className="business-table"><thead><tr><th>Shipment</th><th>Route</th><th>Storage</th><th>Condition</th><th>Status</th><th /></tr></thead>
+            <tbody>{filtered.map(s => <tr key={s.id}>
+              <td><Link className="primary-cell" to={`/shipments/${s.id}`}>{s.shipmentId || s.id}</Link><span className="secondary-cell">{s.trackingNumber}</span></td>
+              <td>{s.origin} <span className="route-arrow">→</span> {s.destination}</td>
+              <td>{s.storageType || s.storageProfileName || '—'}</td>
+              <td><Condition condition={s.condition} /></td>
+              <td><StatusBadge status={s.status} /></td>
+              <td className="shipment-row-actions"><Link className="icon-link" aria-label={`Open ${s.shipmentId || s.id}`} to={`/shipments/${s.id}`}><ArrowRight size={17} /></Link>{role === 'OPERATIONS' && !s.archivedAt && !s.deletedAt && <button className="icon-link lifecycle-action" onClick={() => removeOrArchive(s)} aria-label={s.hasOperationalHistory ? `Archive ${s.shipmentId}` : `Remove ${s.shipmentId}`} title={s.hasOperationalHistory ? 'Archive shipment' : 'Remove shipment'}>{s.hasOperationalHistory ? <Archive size={16}/> : <Trash2 size={16}/>}</button>}</td>
+            </tr>)}</tbody></table></div>
+        )}
+      </section>
 
-      <div className="bg-white border border-clinical-border rounded-lg overflow-hidden clinical-card">
-        <table className="w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
-              <th className="py-2.5 px-4">Shipment ID</th>
-              <th className="py-2.5 px-4">Tracking Number</th>
-              <th className="py-2.5 px-4">Origin & Destination</th>
-              <th className="py-2.5 px-4">Storage Profile</th>
-              <th className="py-2.5 px-4">Cadence</th>
-              <th className="py-2.5 px-4">Lateness Window</th>
-              <th className="py-2.5 px-4">Status</th>
-              <th className="py-2.5 px-4 text-right">View Detail</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {shipments.map((s) => (
-              <tr key={s.id} className="hover:bg-slate-50/80 transition">
-                <td className="py-3 px-4 font-mono font-semibold text-slate-900">{s.id}</td>
-                <td className="py-3 px-4 font-mono text-slate-600">{s.trackingNumber}</td>
-                <td className="py-3 px-4">
-                  <div className="flex items-center space-x-1.5 text-slate-700">
-                    <span>{s.origin}</span>
-                    <ArrowRight className="w-3 h-3 text-slate-400" />
-                    <span className="font-medium text-slate-900">{s.destination}</span>
-                  </div>
-                </td>
-                <td className="py-3 px-4">
-                  <span className="inline-flex items-center space-x-1 font-mono text-[11px] bg-slate-50 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                    <Shield className="w-3 h-3 text-pharma-700" />
-                    <span>{s.storageProfileName || s.storageProfileId}</span>
-                  </span>
-                </td>
-                <td className="py-3 px-4 font-mono text-slate-600">{s.expectedCadenceMinutes}m</td>
-                <td className="py-3 px-4 font-mono text-slate-600">{s.allowedLatenessMinutes}m</td>
-                <td className="py-3 px-4">
-                  <StatusBadge status={s.status} />
-                </td>
-                <td className="py-3 px-4 text-right">
-                  <Link
-                    to={`/shipments/${s.id}`}
-                    className="text-xs font-semibold text-pharma-700 hover:text-pharma-900"
-                  >
-                    Details &rarr;
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Register Modal */}
-      {showCreate && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg border border-clinical-border shadow-xl max-w-md w-full p-5 text-xs">
-            <h3 className="text-sm font-bold text-slate-900 mb-3">Register Temperature-Controlled Shipment</h3>
-            <form onSubmit={handleCreate} className="space-y-3">
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Shipment ID</label>
-                <input
-                  type="text"
-                  value={formData.id}
-                  onChange={(e) => setFormData({ ...formData, id: e.target.value })}
-                  className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Tracking Number</label>
-                <input
-                  type="text"
-                  value={formData.trackingNumber}
-                  onChange={(e) => setFormData({ ...formData, trackingNumber: e.target.value })}
-                  className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Origin</label>
-                  <input
-                    type="text"
-                    value={formData.origin}
-                    onChange={(e) => setFormData({ ...formData, origin: e.target.value })}
-                    className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">Destination</label>
-                  <input
-                    type="text"
-                    value={formData.destination}
-                    onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
-                    className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">Storage Profile</label>
-                <select
-                  value={formData.storageProfileId}
-                  onChange={(e) => setFormData({ ...formData, storageProfileId: e.target.value })}
-                  className="w-full border border-slate-300 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-pharma-700 outline-none"
-                >
-                  <option value="PROFILE-CRT">Controlled Room / Ambient (15°C - 25°C)</option>
-                  <option value="PROFILE-COOL">Cool (8°C - 15°C)</option>
-                  <option value="PROFILE-REF">Refrigerated (2°C - 8°C)</option>
-                  <option value="PROFILE-FRZ">Frozen (-25°C to -10°C)</option>
-                </select>
-              </div>
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setShowCreate(false)}
-                  className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 bg-pharma-700 hover:bg-pharma-800 text-white rounded font-medium"
-                >
-                  Save Shipment
-                </button>
-              </div>
-            </form>
+      {showForm && <Modal title="Register shipment" eyebrow="OPERATIONS" labelledBy="register-title" onClose={() => setShowForm(false)}>
+        <form onSubmit={submit}>
+          <div className="form-stack">
+            <div className="form-grid">
+              <Field label="Shipment reference"><input className="form-input" required maxLength="128" placeholder="e.g. Dublin to St James’s · Batch 14" value={form.shipmentReference} onChange={e => setForm({ ...form, shipmentReference: e.target.value })} /></Field>
+              <Field label="Tracking number"><input className="form-input" required maxLength="128" placeholder="Carrier tracking reference" value={form.trackingNumber} onChange={e => setForm({ ...form, trackingNumber: e.target.value })} /></Field>
+              <Field label="Origin"><input className="form-input" required placeholder="City or facility" value={form.origin} onChange={e => setForm({ ...form, origin: e.target.value })} /></Field>
+              <Field label="Destination"><input className="form-input" required placeholder="City or facility" value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} /></Field>
+              <Field label="Initial status"><select className="form-select full-width" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="PLANNED">Planned</option><option value="IN_TRANSIT">In transit</option></select></Field>
+              <Field label="Expected delivery"><input className="form-input" type="datetime-local" value={form.expectedDeliveryAt} onChange={e => setForm({ ...form, expectedDeliveryAt: e.target.value })} /></Field>
+            </div>
+            <Field label="Storage condition"><select className="form-select full-width" value={form.storageProfileId} onChange={e => setForm({ ...form, storageProfileId: e.target.value })}><option value="PROFILE-REF">Refrigerated · 2–8°C</option><option value="PROFILE-COOL">Cool · 8–15°C</option><option value="PROFILE-CRT">Controlled room · 15–25°C</option><option value="PROFILE-FRZ">Frozen · −25 to −10°C</option></select></Field>
+            {error && <div className="inline-error" role="alert">{error}</div>}
           </div>
-        </div>
-      )}
+          <div className="modal-footer"><button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Register shipment'}</button></div>
+        </form>
+      </Modal>}
     </div>
   );
 }
+
+function Field({ label, children }) { return <label className="form-field"><span>{label}</span>{children}</label>; }
+function Condition({ condition }) { const c = String(condition || 'UNKNOWN').toUpperCase(); const tone = c === 'NORMAL' ? 'normal' : c === 'UNKNOWN' ? 'unknown' : c === 'AT_RISK' ? 'at-risk' : 'alert'; return <span className={`condition-label ${tone}`}><i />{readable(c)}</span>; }

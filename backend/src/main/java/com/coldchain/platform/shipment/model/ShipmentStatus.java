@@ -4,6 +4,8 @@ public enum ShipmentStatus {
     PLANNED,
     IN_TRANSIT,
     DELIVERED,
-    EXCURSION,
+    ON_HOLD,
+    RELEASED,
+    REJECTED,
     CLOSED
 }

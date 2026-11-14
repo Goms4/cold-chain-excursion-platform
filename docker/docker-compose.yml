@@ -4,14 +4,19 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: cold_chain
-      POSTGRES_USER: cold_chain
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cold_chain_secret}
+      POSTGRES_USER: coldchain_admin
+      POSTGRES_PASSWORD: ${COLDCHAIN_ADMIN_PASSWORD:?Set COLDCHAIN_ADMIN_PASSWORD in docker/.env}
+      COLDCHAIN_ADMIN_PASSWORD: ${COLDCHAIN_ADMIN_PASSWORD:?Set COLDCHAIN_ADMIN_PASSWORD in docker/.env}
+      COLDCHAIN_MIGRATOR_PASSWORD: ${COLDCHAIN_MIGRATOR_PASSWORD:?Set COLDCHAIN_MIGRATOR_PASSWORD in docker/.env}
+      COLDCHAIN_APP_PASSWORD: ${COLDCHAIN_APP_PASSWORD:?Set COLDCHAIN_APP_PASSWORD in docker/.env}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-roles.sh:/docker-entrypoint-initdb.d/01-init-roles.sh:ro
+      - ../database/provision-roles.sql:/docker-entrypoint-initdb.d/provision-roles.txt:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cold_chain -d cold_chain"]
+      test: ["CMD-SHELL", "pg_isready -U coldchain_admin -d cold_chain"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -27,9 +32,14 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: cold_chain
-      DB_USER: cold_chain
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-cold_chain_secret}
-      JWT_SECRET: ${JWT_SECRET:-c3VwZXJfc2VjcmV0X2tleV9mb3Jfand0X3NpZ25pbmdfY29sZF9jaGFpbl8yMDI2}
+      DB_USER: coldchain_app
+      DB_PASSWORD: ${COLDCHAIN_APP_PASSWORD:?Set COLDCHAIN_APP_PASSWORD in docker/.env}
+      FLYWAY_USER: coldchain_migrator
+      FLYWAY_PASSWORD: ${COLDCHAIN_MIGRATOR_PASSWORD:?Set COLDCHAIN_MIGRATOR_PASSWORD in docker/.env}
+      COLDLATCH_OPERATIONS_PASSWORD: ${COLDLATCH_OPERATIONS_PASSWORD:?Set COLDLATCH_OPERATIONS_PASSWORD in docker/.env}
+      COLDLATCH_ANALYST_PASSWORD: ${COLDLATCH_ANALYST_PASSWORD:?Set COLDLATCH_ANALYST_PASSWORD in docker/.env}
+      COLDLATCH_FRONTEND_ORIGIN: ${COLDLATCH_FRONTEND_ORIGIN:-http://localhost:3000}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     depends_on:
       postgres:
         condition: service_healthy

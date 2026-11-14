@@ -1,15 +1,31 @@
 package com.coldchain.platform.audit.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Entity
 @Table(name = "audit_history")
 public class AuditRecord {
+    // H2 test profile has no PostgreSQL trigger; production values are always overwritten in the database.
+    private static final AtomicLong TEST_CHAIN_SEQUENCE = new AtomicLong();
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "seq", nullable = false, updatable = false, unique = true)
+    private Long seq;
+
+    @Column(name = "prev_hash", nullable = false, updatable = false, length = 64, columnDefinition = "CHAR(64)")
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String prevHash;
+
+    @Column(name = "row_hash", nullable = false, updatable = false, length = 64, columnDefinition = "CHAR(64)")
+    @JdbcTypeCode(SqlTypes.CHAR)
+    private String rowHash;
 
     @Column(name = "entity_type", nullable = false, length = 64)
     private String entityType;
@@ -19,6 +35,9 @@ public class AuditRecord {
 
     @Column(name = "action", nullable = false, length = 32)
     private String action;
+
+    @Column(name = "category", nullable = false, length = 16, updatable = false)
+    private String category = "BUSINESS";
 
     @Column(name = "actor", nullable = false, length = 128)
     private String actor;
@@ -40,6 +59,15 @@ public class AuditRecord {
 
     public AuditRecord() {}
 
+    @PrePersist
+    private void provideTestProfileChainPlaceholders() {
+        if (seq == null) {
+            seq = TEST_CHAIN_SEQUENCE.incrementAndGet();
+            prevHash = "0".repeat(64);
+            rowHash = "0".repeat(64);
+        }
+    }
+
     public AuditRecord(String entityType, String entityId, String action, String actor,
                        String payloadBefore, String payloadAfter, String rationale) {
         this.entityType = entityType;
@@ -53,8 +81,20 @@ public class AuditRecord {
         this.createdAt = Instant.now();
     }
 
+    public AuditRecord(String entityType, String entityId, String action, String category, String actor,
+                       String payloadBefore, String payloadAfter, String rationale) {
+        this(entityType, entityId, action, actor, payloadBefore, payloadAfter, rationale);
+        this.category = category;
+    }
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public Long getSeq() { return seq; }
+    public void setSeq(Long seq) { this.seq = seq; }
+    public String getPrevHash() { return prevHash; }
+    public void setPrevHash(String prevHash) { this.prevHash = prevHash; }
+    public String getRowHash() { return rowHash; }
+    public void setRowHash(String rowHash) { this.rowHash = rowHash; }
 
     public String getEntityType() { return entityType; }
     public void setEntityType(String entityType) { this.entityType = entityType; }
@@ -64,6 +104,9 @@ public class AuditRecord {
 
     public String getAction() { return action; }
     public void setAction(String action) { this.action = action; }
+
+    public String getCategory() { return category; }
+    public void setCategory(String category) { this.category = category; }
 
     public String getActor() { return actor; }
     public void setActor(String actor) { this.actor = actor; }

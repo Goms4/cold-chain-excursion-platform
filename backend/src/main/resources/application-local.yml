@@ -1,0 +1,4 @@
+app:
+  auth:
+    operations-password: ${COLDLATCH_OPERATIONS_PASSWORD:}
+    analyst-password: ${COLDLATCH_ANALYST_PASSWORD:}

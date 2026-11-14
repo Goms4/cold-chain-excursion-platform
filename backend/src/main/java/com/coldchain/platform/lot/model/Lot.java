@@ -2,6 +2,7 @@ package com.coldchain.platform.lot.model;
 
 import com.coldchain.platform.shipment.model.Shipment;
 import jakarta.persistence.*;
+import java.time.LocalDate;
 import java.time.Instant;
 
 @Entity
@@ -35,6 +36,24 @@ public class Lot {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
+
+    @Column(name = "unloaded_at")
+    private Instant unloadedAt;
+
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "deleted_by", length = 128)
+    private String deletedBy;
+
+    @Column(name = "delete_reason", columnDefinition = "TEXT")
+    private String deleteReason;
 
     public Lot() {}
 
@@ -72,4 +91,19 @@ public class Lot {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public LocalDate getExpiryDate() { return expiryDate; }
+    public void setExpiryDate(LocalDate expiryDate) { this.expiryDate = expiryDate; }
+    public Instant getUnloadedAt() { return unloadedAt; }
+    public void setUnloadedAt(Instant unloadedAt) { this.unloadedAt = unloadedAt; }
+
+    public Instant getArchivedAt() { return archivedAt; }
+    public void setArchivedAt(Instant archivedAt) { this.archivedAt = archivedAt; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+    public String getDeletedBy() { return deletedBy; }
+    public void setDeletedBy(String deletedBy) { this.deletedBy = deletedBy; }
+    public String getDeleteReason() { return deleteReason; }
+    public void setDeleteReason(String deleteReason) { this.deleteReason = deleteReason; }
+    public boolean isDeleted() { return deletedAt != null; }
 }

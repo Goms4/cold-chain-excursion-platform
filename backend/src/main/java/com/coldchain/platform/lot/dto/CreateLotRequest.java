@@ -6,7 +6,6 @@ import jakarta.validation.constraints.NotNull;
 
 public class CreateLotRequest {
 
-    @NotBlank(message = "id is required")
     private String id;
 
     @NotBlank(message = "shipment_id is required")
@@ -21,6 +20,8 @@ public class CreateLotRequest {
     @NotNull(message = "quantity is required")
     @Min(value = 1, message = "quantity must be at least 1")
     private Integer quantity;
+
+    private java.time.LocalDate expiryDate;
 
     public CreateLotRequest() {}
 
@@ -38,4 +39,7 @@ public class CreateLotRequest {
 
     public Integer getQuantity() { return quantity; }
     public void setQuantity(Integer quantity) { this.quantity = quantity; }
+
+    public java.time.LocalDate getExpiryDate() { return expiryDate; }
+    public void setExpiryDate(java.time.LocalDate expiryDate) { this.expiryDate = expiryDate; }
 }

@@ -1,107 +1,67 @@
-import React, { useEffect, useState } from 'react';
-import { History, Filter, Shield } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ChevronDown, ChevronUp, History } from 'lucide-react';
 import { apiRequest } from '../api/client';
-import StatusBadge from '../components/StatusBadge';
+
+const fmt = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const human = value => String(value || '').replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase());
 
 export default function AuditHistory() {
-  const [audits, setAudits] = useState([]);
-  const [filterType, setFilterType] = useState('ALL');
-
-  const loadAudits = async () => {
+  const [records, setRecords] = useState([]);
+  const [technical, setTechnical] = useState([]);
+  const [filter, setFilter] = useState('ALL');
+  const [showTechnical, setShowTechnical] = useState(false);
+  const [expanded, setExpanded] = useState('');
+  const [error, setError] = useState('');
+  const [chain, setChain] = useState(null);
+  const load = useCallback(async () => {
     try {
-      const data = await apiRequest('/api/audit?page=0&size=100');
-      setAudits(data.content || []);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  useEffect(() => {
-    loadAudits();
-    const listener = () => loadAudits();
-    window.addEventListener('cold_chain_refresh', listener);
-    return () => window.removeEventListener('cold_chain_refresh', listener);
+      setError('');
+      const result = await apiRequest('/api/audit/activity?page=0&size=100');
+      setRecords(result.content || []);
+      setChain(await apiRequest('/api/audit/verify'));
+    } catch (e) { setError(e.message || 'Unable to load activity history.'); }
   }, []);
+  const loadTechnical = useCallback(async () => {
+    try {
+      setTechnical(await apiRequest('/api/audit/technical/groups?page=0&size=100') || []);
+    } catch (e) { setError(e.message || 'Unable to load technical audit details.'); }
+  }, []);
+  useEffect(() => { load(); window.addEventListener('cold_chain_refresh', load); return () => window.removeEventListener('cold_chain_refresh', load); }, [load]);
+  useEffect(() => { if (showTechnical) loadTechnical(); }, [showTechnical, loadTechnical]);
+  const filtered = filter === 'ALL' ? records : records.filter(record => record.entityType === filter);
 
-  const filtered = filterType === 'ALL'
-    ? audits
-    : audits.filter(a => a.entityType === filterType);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Immutable Compliance Audit Ledger</h2>
-          <p className="text-xs text-clinical-muted">Append-only chronological audit log preserving every platform state mutation, actor, and rationale</p>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <Filter className="w-3.5 h-3.5 text-slate-400" />
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="text-xs border border-slate-300 rounded px-2.5 py-1 bg-white text-slate-700 outline-none"
-          >
-            <option value="ALL">All Entity Types</option>
-            <option value="SHIPMENT">Shipments</option>
-            <option value="LOT">Lots</option>
-            <option value="SENSOR_EVENT">Sensor Events</option>
-            <option value="EXCURSION">Excursions</option>
-            <option value="INVESTIGATION">Investigations</option>
-            <option value="DECISION">Decisions</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="bg-white border border-clinical-border rounded-lg overflow-hidden clinical-card">
-        <div className="px-5 py-3 border-b border-clinical-border bg-slate-50 flex items-center justify-between">
-          <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">Audit Records ({filtered.length})</span>
-          <span className="text-[11px] font-mono text-slate-400">Read-Only Compliance View</span>
-        </div>
-
-        {filtered.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-xs">
-            No audit records matching selected filter.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-[10px] text-slate-500 font-semibold uppercase tracking-wider font-mono">
-                  <th className="py-2.5 px-4">Timestamp (UTC)</th>
-                  <th className="py-2.5 px-4">Entity</th>
-                  <th className="py-2.5 px-4">Entity ID</th>
-                  <th className="py-2.5 px-4">Action</th>
-                  <th className="py-2.5 px-4">Actor</th>
-                  <th className="py-2.5 px-4">Audit Rationale</th>
-                  <th className="py-2.5 px-4">State Mutation</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-[11px]">
-                {filtered.map((record) => (
-                  <tr key={record.id} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-4 font-mono text-slate-500 whitespace-nowrap">
-                      {new Date(record.timestamp).toISOString()}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono font-semibold text-slate-700">
-                      {record.entityType}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono text-slate-900">{record.entityId}</td>
-                    <td className="py-2.5 px-4">
-                      <StatusBadge status={record.action} />
-                    </td>
-                    <td className="py-2.5 px-4 font-medium text-slate-800">{record.actor}</td>
-                    <td className="py-2.5 px-4 text-slate-600 max-w-xs">{record.rationale || '-'}</td>
-                    <td className="py-2.5 px-4 font-mono text-[10px] text-slate-500 max-w-sm truncate" title={record.payloadAfter}>
-                      {record.payloadAfter || '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="page-stack">
+    <div className="page-heading-row"><div><span className="eyebrow">ACCOUNTABILITY</span><h1>Activity history</h1><p>See who changed what, for which shipment, when and why.</p></div><select className="form-select" value={filter} onChange={e => setFilter(e.target.value)}><option value="ALL">All activity</option><option value="SHIPMENT">Shipments</option><option value="LOT">Lots</option><option value="SENSOR_EVENT">Temperature readings</option><option value="EXCURSION">Temperature issues</option><option value="INVESTIGATION">Investigations</option><option value="DECISION">Decisions</option></select></div>
+    {error && <div className="alert-card error">{error}</div>}
+    {chain && <p className={chain.ok ? 'audit-chain-status' : 'audit-chain-status broken'} role="status">{chain.ok ? `Chain verified: ${chain.rowsChecked} records, checked ${fmt(chain.checkedAt)}` : `Chain broken at record ${chain.firstBrokenSeq}`}</p>}
+    <section className="content-card audit-list">
+      {filtered.length === 0 ? <div className="empty-state"><span className="empty-icon"><History size={20}/></span><strong>No activity to show</strong><span>Recorded shipment, temperature and review actions appear here.</span></div> : filtered.map(record => {
+        const key = record.id;
+        const open = expanded === `business:${key}`;
+        const reference = [record.shipmentId, record.investigationId, ...(record.lotIds || [])].filter(Boolean).join(' · ') || record.entityId;
+        return <article className="audit-entry" key={key}>
+          <button className="audit-entry-button" onClick={() => setExpanded(open ? '' : `business:${key}`)} aria-expanded={open}>
+            <span className="audit-time"><span className="mono">#{record.seq}</span><br/>{fmt(record.timestamp)}</span>
+            <span className="audit-action"><strong>{record.action}</strong><small>{record.summary}</small><small className="mono" title={`row_hash: ${record.rowHash}\nprev_hash: ${record.prevHash}`}>{record.rowHash?.slice(0, 8)}</small></span>
+            <span className="audit-actor">{record.actor}</span>{open ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+          </button>
+          {open && <div className="audit-details"><div><span>Related records</span><strong>{reference}</strong></div><div><span>Reason</span><p>{record.rationale || 'No additional reason was recorded.'}</p></div></div>}
+        </article>;
+      })}
+    </section>
+    <button className="text-link audit-technical-toggle" type="button" aria-pressed={showTechnical} onClick={() => { setShowTechnical(value => !value); setExpanded(''); }}>{showTechnical ? 'Hide technical events' : 'Show technical events'}</button>
+    {showTechnical && <section className="content-card audit-list technical-audit-list" aria-label="Technical audit events">
+      <div className="section-heading"><div><h2>Technical audit details</h2><p>Internal event references and processing notes</p></div></div>
+      {technical.map(group => {
+        const key = `technical:${group.id}`;
+        const open = expanded === key;
+        return <article className="audit-entry" key={group.id}>
+          <button className="audit-entry-button" onClick={() => setExpanded(open ? '' : key)} aria-expanded={open}>
+            <span className="audit-time">{fmt(group.latestAt)}</span><span className="audit-action"><strong>{group.summary}</strong><small>{group.count} event{group.count === 1 ? '' : 's'} · {human(group.action)}</small></span><span className="audit-actor">{group.shipmentId || 'System'}</span>{open ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+          </button>
+          {open && <div className="audit-details">{group.entries.map(entry => <div key={entry.id}><span>{fmt(entry.timestamp)} · {entry.actor} · {entry.entityId}</span><p>{entry.details || 'No additional details were recorded.'}</p></div>)}</div>}
+        </article>;
+      })}
+    </section>}
+  </div>;
 }

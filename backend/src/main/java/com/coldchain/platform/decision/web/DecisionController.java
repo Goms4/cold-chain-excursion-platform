@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,7 +25,10 @@ public class DecisionController {
     public ResponseEntity<DecisionResponse> recordDecision(@PathVariable String id,
                                                            @Valid @RequestBody RecordDecisionRequest request,
                                                            Authentication authentication) {
-        String actor = authentication != null ? authentication.getName() : request.getInvestigatorName();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new AccessDeniedException("An authenticated analyst is required to record a decision.");
+        }
+        String actor = authentication.getName();
         DecisionResponse response = decisionService.recordDecision(id, request, actor);
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }

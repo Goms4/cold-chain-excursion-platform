@@ -7,9 +7,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!frontend/.env.development
 .idea/
 .vscode/
 *.iml
 .DS_Store
 *.log
 data-pipeline/output/
+
+# Local database backups
+backups/
+
+frontend/.env.development

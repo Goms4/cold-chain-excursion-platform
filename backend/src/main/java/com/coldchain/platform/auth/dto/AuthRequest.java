@@ -3,29 +3,13 @@ package com.coldchain.platform.auth.dto;
 import com.coldchain.platform.common.security.Role;
 
 public class AuthRequest {
-    private String username;
     private Role role;
-
-    public AuthRequest() {}
-
-    public AuthRequest(String username, Role role) {
-        this.username = username;
-        this.role = role;
-    }
-
-    public String getUsername() {
-        return username;
-    }
-
-    public void setUsername(String username) {
-        this.username = username;
-    }
-
-    public Role getRole() {
-        return role;
-    }
-
-    public void setRole(Role role) {
-        this.role = role;
-    }
+    private String companyName;
+    private String password;
+    public Role getRole() { return role; }
+    public void setRole(Role role) { this.role = role; }
+    public String getCompanyName() { return companyName; }
+    public void setCompanyName(String companyName) { this.companyName = companyName; }
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
 }

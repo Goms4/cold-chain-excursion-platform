@@ -1,6 +1,7 @@
 package com.coldchain.platform.sensor.service;
 
 import com.coldchain.platform.audit.service.AuditService;
+import com.coldchain.platform.common.BusinessIdGenerator;
 import com.coldchain.platform.common.exception.ResourceNotFoundException;
 import com.coldchain.platform.common.exception.ValidationException;
 import com.coldchain.platform.sensor.dto.AssignSensorRequest;
@@ -22,13 +23,25 @@ public class SensorService {
     private final SensorRepository sensorRepository;
     private final ShipmentRepository shipmentRepository;
     private final AuditService auditService;
+    private final BusinessIdGenerator businessIdGenerator;
 
     public SensorService(SensorRepository sensorRepository,
                          ShipmentRepository shipmentRepository,
-                         AuditService auditService) {
+                         AuditService auditService,
+                         BusinessIdGenerator businessIdGenerator) {
         this.sensorRepository = sensorRepository;
         this.shipmentRepository = shipmentRepository;
         this.auditService = auditService;
+        this.businessIdGenerator = businessIdGenerator;
+    }
+
+    @Transactional
+    public SensorResponse provisionForShipment(Shipment shipment, String actor) {
+        Sensor sensor = new Sensor(businessIdGenerator.nextSensorId(), "ColdLatch temperature logger", 100, shipment);
+        Sensor saved = sensorRepository.save(sensor);
+        auditService.recordAudit("SENSOR", saved.getId(), "REGISTERED", actor, null,
+                "Provisioned temperature logger " + saved.getId() + " for shipment " + shipment.getId(), "Shipment registration");
+        return SensorResponse.fromEntity(saved);
     }
 
     @Transactional

@@ -30,4 +30,7 @@ public interface ProcessedSensorEventRepository extends JpaRepository<ProcessedS
 
     long countByShipmentId(String shipmentId);
     long countByShipmentIdAndIsDuplicateTrue(String shipmentId);
+    long countByExcursionIncidentIdAndIsDuplicateFalse(String excursionIncidentId);
+    List<ProcessedSensorEvent> findByExcursionIncidentId(String excursionIncidentId);
+    boolean existsByLot_Id(String lotId);
 }

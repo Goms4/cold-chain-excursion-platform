@@ -1,6 +1,7 @@
 package com.coldchain.platform.excursion.service;
 
 import com.coldchain.platform.audit.service.AuditService;
+import com.coldchain.platform.common.BusinessIdGenerator;
 import com.coldchain.platform.common.exception.ResourceNotFoundException;
 import com.coldchain.platform.excursion.dto.ExcursionResponse;
 import com.coldchain.platform.excursion.model.ExcursionAffectedLot;
@@ -9,6 +10,7 @@ import com.coldchain.platform.excursion.model.ExcursionSeverity;
 import com.coldchain.platform.excursion.model.IncidentStatus;
 import com.coldchain.platform.excursion.repository.ExcursionAffectedLotRepository;
 import com.coldchain.platform.excursion.repository.ExcursionIncidentRepository;
+import com.coldchain.platform.event.repository.ProcessedSensorEventRepository;
 import com.coldchain.platform.investigation.service.InvestigationService;
 import com.coldchain.platform.lot.model.Lot;
 import com.coldchain.platform.lot.service.LotTracingService;
@@ -23,7 +25,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,19 +36,25 @@ public class ExcursionIncidentService {
     private final LotTracingService lotTracingService;
     private final InvestigationService investigationService;
     private final AuditService auditService;
+    private final BusinessIdGenerator businessIdGenerator;
+    private final ProcessedSensorEventRepository eventRepository;
 
     public ExcursionIncidentService(ExcursionIncidentRepository incidentRepository,
                                     ExcursionAffectedLotRepository affectedLotRepository,
                                     ShipmentRepository shipmentRepository,
                                     LotTracingService lotTracingService,
                                     InvestigationService investigationService,
-                                    AuditService auditService) {
+                                    AuditService auditService,
+                                    BusinessIdGenerator businessIdGenerator,
+                                    ProcessedSensorEventRepository eventRepository) {
         this.incidentRepository = incidentRepository;
         this.affectedLotRepository = affectedLotRepository;
         this.shipmentRepository = shipmentRepository;
         this.lotTracingService = lotTracingService;
         this.investigationService = investigationService;
         this.auditService = auditService;
+        this.businessIdGenerator = businessIdGenerator;
+        this.eventRepository = eventRepository;
     }
 
     @Transactional
@@ -85,7 +92,7 @@ public class ExcursionIncidentService {
             incidentRepository.save(incident);
         } else {
             // Create a new Excursion Incident
-            String incidentId = "EXC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            String incidentId = businessIdGenerator.nextIssueId();
             incident = new ExcursionIncident(
                     incidentId,
                     shipment,
@@ -99,15 +106,12 @@ public class ExcursionIncidentService {
             incidentRepository.save(incident);
 
             // Update shipment status to EXCURSION
-            shipment.setStatus(ShipmentStatus.EXCURSION);
-            shipmentRepository.save(shipment);
-
-            auditService.recordAudit("EXCURSION", incident.getId(), "CREATED", "EXCURSION_ENGINE", null,
+            auditService.recordAudit("EXCURSION", incident.getId(), "CREATED", "System", null,
                     "Excursion detected: " + severity.name() + " at " + temperature + "°C",
                     "Storage profile excursion threshold breached");
 
             // Trace and link affected lots
-            List<Lot> affectedLots = lotTracingService.traceAndFlagLotsForExcursion(shipment.getId(), incident.getId(), severity);
+            List<Lot> affectedLots = lotTracingService.traceAndFlagLotsForExcursion(shipment.getId(), incident.getId(), severity, eventTime);
             for (Lot lot : affectedLots) {
                 ExcursionAffectedLot affectedLot = new ExcursionAffectedLot(incident, lot, lot.getRiskLevel().name());
                 affectedLotRepository.save(affectedLot);
@@ -127,7 +131,7 @@ public class ExcursionIncidentService {
         List<String> affectedLotIds = affectedLotRepository.findByExcursionId(id).stream()
                 .map(a -> a.getLot().getId())
                 .collect(Collectors.toList());
-        return ExcursionResponse.fromEntity(incident, affectedLotIds);
+        return response(incident, affectedLotIds);
     }
 
     @Transactional(readOnly = true)
@@ -137,19 +141,20 @@ public class ExcursionIncidentService {
                     List<String> lotIds = affectedLotRepository.findByExcursionId(i.getId()).stream()
                             .map(a -> a.getLot().getId())
                             .collect(Collectors.toList());
-                    return ExcursionResponse.fromEntity(i, lotIds);
+                    return response(i, lotIds);
                 })
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<ExcursionResponse> getExcursionsByShipment(String shipmentId) {
-        return incidentRepository.findByShipmentId(shipmentId).stream()
+        String resolvedShipmentId = shipmentRepository.existsById(shipmentId) ? shipmentId : com.coldchain.platform.common.BusinessIds.internalShipment(shipmentId);
+        return incidentRepository.findByShipmentId(resolvedShipmentId).stream()
                 .map(i -> {
                     List<String> lotIds = affectedLotRepository.findByExcursionId(i.getId()).stream()
                             .map(a -> a.getLot().getId())
                             .collect(Collectors.toList());
-                    return ExcursionResponse.fromEntity(i, lotIds);
+                    return response(i, lotIds);
                 })
                 .collect(Collectors.toList());
     }
@@ -158,5 +163,10 @@ public class ExcursionIncidentService {
     public ExcursionIncident getExcursionEntity(String id) {
         return incidentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("ExcursionIncident", id));
+    }
+
+    private ExcursionResponse response(ExcursionIncident incident, List<String> lotIds) {
+        return ExcursionResponse.fromEntity(incident, lotIds,
+                eventRepository.countByExcursionIncidentIdAndIsDuplicateFalse(incident.getId()));
     }
 }
