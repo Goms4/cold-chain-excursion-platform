@@ -275,3 +275,4 @@ npm run test:e2e
 ```
 
 Screenshots are written to `docs/screenshots/` at 1440, 1280, 1024, and 768px.
+
